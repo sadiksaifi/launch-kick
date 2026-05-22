@@ -1,0 +1,48 @@
+# Darwin/macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Local env / editor
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Project build output
+.build/
+**/.build/
+
+# Rust / Cargo
+/target/
+core/target/
+**/*.rs.bk
+*.pdb
+rustc-ice-*.txt
+**/mutants.out*/
+
+# Swift / Xcode
+xcuserdata/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+timeline.xctimeline
+playground.xcworkspace
+.swiftpm/
+Carthage/Build/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Agent/tool local state
+.pi/
+.claude/
+.codex/
