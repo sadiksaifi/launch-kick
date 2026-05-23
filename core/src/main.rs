@@ -1,6 +1,5 @@
 mod app;
 mod applications;
-mod calculator;
 mod ipc;
 mod platform;
 mod session;

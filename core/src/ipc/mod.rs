@@ -4,8 +4,6 @@ use std::{error::Error, fmt};
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
-    #[serde(rename = "input")]
-    Input { text: String },
     #[serde(rename = "app::list")]
     AppList,
     #[serde(rename = "app::launch")]
@@ -21,8 +19,6 @@ pub struct Application {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
-    #[serde(rename = "result")]
-    Result { value: String },
     #[serde(rename = "app::list")]
     AppList { apps: Vec<Application> },
 }
@@ -88,6 +84,13 @@ mod tests {
     }
 
     #[test]
+    fn rejects_legacy_input_message() {
+        let error = decode_client_line(r#"{"type":"input","text":"1 + 2"}"#).unwrap_err();
+
+        assert!(error.to_string().contains("invalid IPC message"));
+    }
+
+    #[test]
     fn rejects_unknown_client_message_type() {
         let error = decode_client_line(r#"{"type":"unknown","text":"1 + 2"}"#).unwrap_err();
 
@@ -96,7 +99,7 @@ mod tests {
 
     #[test]
     fn rejects_malformed_json() {
-        assert!(decode_client_line(r#"{"type":"input","text":"1 + 2"#).is_err());
+        assert!(decode_client_line(r#"{"type":"app::launch","path":"/Applications/Safari.app""#).is_err());
     }
 
     #[test]

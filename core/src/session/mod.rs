@@ -1,6 +1,5 @@
 use crate::{
     applications::{ApplicationService, SystemApplicationService},
-    calculator,
     ipc::{Application, ClientMessage, ServerMessage},
 };
 
@@ -23,9 +22,6 @@ impl CoreSession {
 
     pub fn handle_client_message(&mut self, message: ClientMessage) -> Option<ServerMessage> {
         match message {
-            ClientMessage::Input { text } => Some(ServerMessage::Result {
-                value: calculator::evaluate(&text),
-            }),
             ClientMessage::AppList => Some(ServerMessage::AppList {
                 apps: self.application_service.list_applications(),
             }),
