@@ -169,10 +169,10 @@ fn discover_in_directory(
         }
 
         if is_application_bundle(&path) {
-            if let Some(application) = application_from_bundle(&path) {
-                if seen_paths.insert(application.path.clone()) {
-                    applications.push(application);
-                }
+            if let Some(application) = application_from_bundle(&path)
+                && seen_paths.insert(application.path.clone())
+            {
+                applications.push(application);
             }
             continue;
         }
