@@ -1,3 +1,8 @@
+struct ExecuteIntent: Equatable {
+    let resultID: String
+    let actionID: String
+}
+
 struct LauncherState: Equatable {
     private(set) var results: [LauncherResult] = []
     private(set) var selectedIndex: Int?
@@ -54,6 +59,11 @@ struct LauncherState: Equatable {
     func selectedResult() -> LauncherResult? {
         guard let selectedIndex, results.indices.contains(selectedIndex) else { return nil }
         return results[selectedIndex]
+    }
+
+    func selectedExecuteIntent() -> ExecuteIntent? {
+        guard let result = selectedResult(), let action = result.actions.first else { return nil }
+        return ExecuteIntent(resultID: result.id, actionID: action.id)
     }
 
     func result(at index: Int) -> LauncherResult? {

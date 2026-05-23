@@ -1,7 +1,7 @@
 import Foundation
 
 final class CoreIPC {
-    private var stdinBuffer = ""
+    private var lineBuffer = NDJSONLineBuffer()
     private let contract = IPCContract()
 
     var onResults: ((String, [LauncherResult]) -> Void)?
@@ -27,11 +27,7 @@ final class CoreIPC {
     }
 
     private func handle(_ data: Data) {
-        stdinBuffer += String(data: data, encoding: .utf8) ?? ""
-
-        while let newline = stdinBuffer.firstIndex(of: "\n") {
-            let line = String(stdinBuffer[..<newline])
-            stdinBuffer.removeSubrange(...newline)
+        for line in lineBuffer.append(data) {
             handleLine(line)
         }
     }

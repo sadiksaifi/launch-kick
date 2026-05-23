@@ -1,15 +1,11 @@
 use crate::ipc::{self, ClientMessage, ServerMessage};
 use std::io::{self, BufRead, Write};
 
-pub trait MessageHandler {
-    fn handle_client_message(&mut self, message: ClientMessage) -> Vec<ServerMessage>;
-}
-
-pub fn run_ndjson_loop<R, W, H>(reader: R, mut writer: W, handler: &mut H) -> io::Result<()>
+pub fn run_ndjson_loop<R, W, H>(reader: R, mut writer: W, mut handle_message: H) -> io::Result<()>
 where
     R: BufRead,
     W: Write,
-    H: MessageHandler,
+    H: FnMut(ClientMessage) -> Vec<ServerMessage>,
 {
     for line in reader.lines() {
         let line = line?;
@@ -17,7 +13,7 @@ where
             continue;
         };
 
-        for response in handler.handle_client_message(message) {
+        for response in handle_message(message) {
             let line = ipc::encode_server_line(&response).map_err(io::Error::other)?;
             writer.write_all(line.as_bytes())?;
             writer.flush()?;
@@ -36,13 +32,17 @@ mod tests {
 
     #[test]
     fn eof_exits_cleanly() {
-        let mut handler = RecordingHandler::default();
+        let mut messages = Vec::new();
         let mut output = Vec::new();
 
-        run_ndjson_loop(io::Cursor::new(Vec::<u8>::new()), &mut output, &mut handler).unwrap();
+        run_ndjson_loop(io::Cursor::new(Vec::<u8>::new()), &mut output, |message| {
+            messages.push(message);
+            Vec::new()
+        })
+        .unwrap();
 
         assert!(output.is_empty());
-        assert!(handler.messages.is_empty());
+        assert!(messages.is_empty());
     }
 
     #[test]
@@ -54,7 +54,10 @@ mod tests {
         let input = b"not json\n{\"type\":\"launcher::query\",\"query\":\"saf\"}\n";
         let mut output = Vec::new();
 
-        run_ndjson_loop(io::Cursor::new(input), &mut output, &mut handler).unwrap();
+        run_ndjson_loop(io::Cursor::new(input), &mut output, |message| {
+            handler.handle(message)
+        })
+        .unwrap();
 
         let lines = output_lines(&output);
         assert_eq!(handler.messages.len(), 1);
@@ -79,7 +82,10 @@ mod tests {
         let input = b"{\"type\":\"launcher::query\",\"query\":\"\"}\n{\"type\":\"launcher::execute\",\"result_id\":\"application:/Applications/Safari.app\",\"action_id\":\"open\"}\n";
         let mut output = Vec::new();
 
-        run_ndjson_loop(io::Cursor::new(input), &mut output, &mut handler).unwrap();
+        run_ndjson_loop(io::Cursor::new(input), &mut output, |message| {
+            handler.handle(message)
+        })
+        .unwrap();
 
         let lines = output_lines(&output);
         assert_eq!(handler.messages.len(), 2);
@@ -99,7 +105,10 @@ mod tests {
         let input = b"{\"type\":\"launcher::execute\",\"result_id\":\"application:/Applications/Safari.app\",\"action_id\":\"open\"}\n";
         let mut writer = RecordingWriter::default();
 
-        run_ndjson_loop(io::Cursor::new(input), &mut writer, &mut handler).unwrap();
+        run_ndjson_loop(io::Cursor::new(input), &mut writer, |message| {
+            handler.handle(message)
+        })
+        .unwrap();
 
         assert_eq!(writer.flushes, 1);
         assert_eq!(writer.writes.len(), 1);
@@ -116,7 +125,10 @@ mod tests {
         let input = b"{\"type\":\"launcher::execute\",\"result_id\":\"application:/Applications/Safari.app\",\"action_id\":\"open\"}\n";
         let mut writer = FailingWriter;
 
-        let error = run_ndjson_loop(io::Cursor::new(input), &mut writer, &mut handler).unwrap_err();
+        let error = run_ndjson_loop(io::Cursor::new(input), &mut writer, |message| {
+            handler.handle(message)
+        })
+        .unwrap_err();
 
         assert_eq!(error.kind(), ErrorKind::BrokenPipe);
     }
@@ -138,10 +150,8 @@ mod tests {
                 responses,
             }
         }
-    }
 
-    impl MessageHandler for RecordingHandler {
-        fn handle_client_message(&mut self, message: ClientMessage) -> Vec<ServerMessage> {
+        fn handle(&mut self, message: ClientMessage) -> Vec<ServerMessage> {
             self.messages.push(message);
             if self.responses.is_empty() {
                 Vec::new()
