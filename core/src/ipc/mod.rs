@@ -6,6 +6,10 @@ use std::{error::Error, fmt};
 pub enum ClientMessage {
     #[serde(rename = "input")]
     Input { text: String },
+    #[serde(rename = "app::list")]
+    AppList,
+    #[serde(rename = "app::launch")]
+    AppLaunch { path: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -54,13 +58,23 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn decodes_input_message() {
-        let message = decode_client_line(r#"{"type":"input","text":"1 + 2"}"#).unwrap();
+    fn decodes_app_list_message() {
+        let message = decode_client_line(r#"{"type":"app::list"}"#).unwrap();
+
+        assert_eq!(message, ClientMessage::AppList);
+    }
+
+    #[test]
+    fn decodes_app_launch_message() {
+        let message = decode_client_line(
+            r#"{"type":"app::launch","path":"/Applications/Safari.app"}"#,
+        )
+        .unwrap();
 
         assert_eq!(
             message,
-            ClientMessage::Input {
-                text: "1 + 2".to_string()
+            ClientMessage::AppLaunch {
+                path: "/Applications/Safari.app".to_string()
             }
         );
     }

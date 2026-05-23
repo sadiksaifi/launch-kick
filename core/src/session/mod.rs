@@ -15,6 +15,7 @@ impl CoreSession {
             ClientMessage::Input { text } => Some(ServerMessage::Result {
                 value: calculator::evaluate(&text),
             }),
+            ClientMessage::AppList | ClientMessage::AppLaunch { .. } => None,
         }
     }
 }
