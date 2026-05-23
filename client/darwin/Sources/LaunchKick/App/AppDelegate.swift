@@ -148,9 +148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: tableView.bounds.width, height: tableView.rowHeight))
         cell.identifier = NSUserInterfaceItemIdentifier("ApplicationCell")
 
-        let icon = NSImageView(frame: NSRect(x: 12, y: 8, width: 32, height: 32))
-        icon.image = NSWorkspace.shared.icon(forFile: app.path)
-        icon.imageScaling = .scaleProportionallyUpOrDown
+        // let icon = NSImageView(frame: NSRect(x: 12, y: 8, width: 32, height: 32))
+        // icon.image = NSWorkspace.shared.icon(forFile: app.path)
+        // icon.imageScaling = .scaleProportionallyUpOrDown
 
         let name = NSTextField(labelWithString: app.name)
         name.frame = NSRect(x: 56, y: 11, width: max(0, tableView.bounds.width - 68), height: 26)
@@ -158,9 +158,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         name.textColor = .labelColor
         name.lineBreakMode = .byTruncatingTail
 
-        cell.addSubview(icon)
+        // cell.addSubview(icon)
         cell.addSubview(name)
-        cell.imageView = icon
+        // cell.imageView = icon
         cell.textField = name
         return cell
     }
