@@ -1,7 +1,10 @@
 use crate::{
     applications::{ApplicationService, SystemApplicationService},
-    ipc::{Application, ClientMessage, ServerMessage},
+    ipc::{ClientMessage, ServerMessage},
 };
+
+#[cfg(test)]
+use crate::ipc::Application;
 
 pub struct CoreSession {
     application_service: Box<dyn ApplicationService>,
@@ -12,12 +15,15 @@ impl CoreSession {
         Self::with_application_service(Box::new(SystemApplicationService))
     }
 
+    #[cfg(test)]
     pub fn with_applications(applications: Vec<Application>) -> Self {
         Self::with_application_service(Box::new(StaticApplicationService { applications }))
     }
 
     pub fn with_application_service(application_service: Box<dyn ApplicationService>) -> Self {
-        Self { application_service }
+        Self {
+            application_service,
+        }
     }
 
     pub fn handle_client_message(&mut self, message: ClientMessage) -> Option<ServerMessage> {
@@ -33,10 +39,12 @@ impl CoreSession {
     }
 }
 
+#[cfg(test)]
 struct StaticApplicationService {
     applications: Vec<Application>,
 }
 
+#[cfg(test)]
 impl ApplicationService for StaticApplicationService {
     fn list_applications(&mut self) -> Vec<Application> {
         self.applications.clone()
