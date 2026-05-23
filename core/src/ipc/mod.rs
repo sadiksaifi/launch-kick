@@ -4,15 +4,30 @@ use std::{error::Error, fmt};
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
-    #[serde(rename = "input")]
-    Input { text: String },
+    #[serde(rename = "app::list")]
+    AppList,
+    #[serde(rename = "app::launch")]
+    AppLaunch { path: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Application {
+    pub name: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
-    #[serde(rename = "result")]
-    Result { value: String },
+    #[serde(rename = "app::list")]
+    AppList { apps: Vec<Application> },
+    #[serde(rename = "app::launch::result")]
+    AppLaunchResult {
+        path: String,
+        ok: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
 }
 
 #[derive(Debug)]
@@ -51,18 +66,76 @@ pub fn encode_server_line(message: &ServerMessage) -> Result<String, IpcError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+
+    const CLIENT_APP_LIST: &str = include_str!("../../../ipc/fixtures/client-app-list.json");
+    const CLIENT_APP_LAUNCH: &str = include_str!("../../../ipc/fixtures/client-app-launch.json");
+    const SERVER_APP_LIST: &str = include_str!("../../../ipc/fixtures/server-app-list.json");
+    const SERVER_APP_LAUNCH_SUCCEEDED: &str =
+        include_str!("../../../ipc/fixtures/server-app-launch-succeeded.json");
+    const SERVER_APP_LAUNCH_FAILED: &str =
+        include_str!("../../../ipc/fixtures/server-app-launch-failed.json");
 
     #[test]
-    fn decodes_input_message() {
-        let message = decode_client_line(r#"{"type":"input","text":"1 + 2"}"#).unwrap();
+    fn decodes_client_app_list_fixture() {
+        let message = decode_client_line(CLIENT_APP_LIST).unwrap();
+
+        assert_eq!(message, ClientMessage::AppList);
+    }
+
+    #[test]
+    fn decodes_client_app_launch_fixture() {
+        let message = decode_client_line(CLIENT_APP_LAUNCH).unwrap();
 
         assert_eq!(
             message,
-            ClientMessage::Input {
-                text: "1 + 2".to_string()
+            ClientMessage::AppLaunch {
+                path: "/Applications/Safari.app".to_string()
             }
         );
+    }
+
+    #[test]
+    fn encodes_server_app_list_fixture() {
+        let line = encode_server_line(&ServerMessage::AppList {
+            apps: vec![Application {
+                name: "Safari".to_string(),
+                path: "/Applications/Safari.app".to_string(),
+            }],
+        })
+        .unwrap();
+
+        assert_json_line_eq(&line, SERVER_APP_LIST);
+    }
+
+    #[test]
+    fn encodes_server_app_launch_success_fixture() {
+        let line = encode_server_line(&ServerMessage::AppLaunchResult {
+            path: "/Applications/Safari.app".to_string(),
+            ok: true,
+            error: None,
+        })
+        .unwrap();
+
+        assert_json_line_eq(&line, SERVER_APP_LAUNCH_SUCCEEDED);
+    }
+
+    #[test]
+    fn encodes_server_app_launch_failure_fixture() {
+        let line = encode_server_line(&ServerMessage::AppLaunchResult {
+            path: "/Applications/Missing.app".to_string(),
+            ok: false,
+            error: Some("launch failed".to_string()),
+        })
+        .unwrap();
+
+        assert_json_line_eq(&line, SERVER_APP_LAUNCH_FAILED);
+    }
+
+    #[test]
+    fn rejects_legacy_input_message() {
+        let error = decode_client_line(r#"{"type":"input","text":"1 + 2"}"#).unwrap_err();
+
+        assert!(error.to_string().contains("invalid IPC message"));
     }
 
     #[test]
@@ -74,18 +147,16 @@ mod tests {
 
     #[test]
     fn rejects_malformed_json() {
-        assert!(decode_client_line(r#"{"type":"input","text":"1 + 2"#).is_err());
+        assert!(
+            decode_client_line(r#"{"type":"app::launch","path":"/Applications/Safari.app""#)
+                .is_err()
+        );
     }
 
-    #[test]
-    fn encodes_result_message_as_json_line() {
-        let line = encode_server_line(&ServerMessage::Result {
-            value: "3".to_string(),
-        })
-        .unwrap();
-
-        assert!(line.ends_with('\n'));
-        let value: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
-        assert_eq!(value, json!({ "type": "result", "value": "3" }));
+    fn assert_json_line_eq(actual_line: &str, expected_json: &str) {
+        assert!(actual_line.ends_with('\n'));
+        let actual: serde_json::Value = serde_json::from_str(actual_line.trim_end()).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(expected_json).unwrap();
+        assert_eq!(actual, expected);
     }
 }

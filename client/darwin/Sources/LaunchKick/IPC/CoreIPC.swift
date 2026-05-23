@@ -1,20 +1,11 @@
 import Foundation
 
-private struct ClientInputMessage: Encodable {
-    let type = "input"
-    let text: String
-}
-
-private struct ServerResultMessage: Decodable {
-    let type: String
-    let value: String
-}
-
 final class CoreIPC {
     private var stdinBuffer = ""
-    private let decoder = JSONDecoder()
-    private let encoder = JSONEncoder()
-    var onResult: ((String) -> Void)?
+    private let contract = IPCContract()
+
+    var onAppList: (([LauncherApplication]) -> Void)?
+    var onAppLaunchResult: ((String, Bool, String?) -> Void)?
 
     func startListening() {
         FileHandle.standardInput.readabilityHandler = { [weak self] handle in
@@ -27,8 +18,12 @@ final class CoreIPC {
         }
     }
 
-    func sendInput(_ text: String) {
-        sendToCore(ClientInputMessage(text: text))
+    func sendAppListRequest() {
+        sendToCore(AppListRequest())
+    }
+
+    func sendAppLaunch(path: String) {
+        sendToCore(AppLaunchRequest(path: path))
     }
 
     private func handle(_ data: Data) {
@@ -42,22 +37,23 @@ final class CoreIPC {
     }
 
     private func handleLine(_ line: String) {
-        guard
-            let data = line.data(using: .utf8),
-            let result = try? decoder.decode(ServerResultMessage.self, from: data),
-            result.type == "result"
-        else { return }
+        guard let message = try? contract.decodeServerLine(line) else { return }
 
-        onResult?(result.value)
+        switch message {
+        case .appList(let apps):
+            onAppList?(apps)
+        case .appLaunchResult(let path, let ok, let error):
+            onAppLaunchResult?(path, ok, error)
+        }
     }
 
     private func sendToCore<Message: Encodable>(_ message: Message) {
         guard
-            let data = try? encoder.encode(message),
-            let line = String(data: data, encoding: .utf8)
+            let line = try? contract.encodeClientLine(message),
+            let data = line.data(using: .utf8)
         else { return }
 
-        print(line)
+        FileHandle.standardOutput.write(data)
         fflush(stdout)
     }
 }
