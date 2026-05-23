@@ -90,12 +90,12 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                 return nil
             }
 
-            if event.isArrowDown {
+            if event.isArrowDown || event.isControlN {
                 apply(.moveSelection(1))
                 return nil
             }
 
-            if event.isArrowUp {
+            if event.isArrowUp || event.isControlP {
                 apply(.moveSelection(-1))
                 return nil
             }

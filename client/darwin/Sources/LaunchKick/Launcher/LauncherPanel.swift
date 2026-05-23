@@ -60,4 +60,14 @@ extension NSEvent {
     var isArrowUp: Bool {
         keyCode == 126
     }
+
+    var isControlN: Bool {
+        let flags = modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return flags == .control && charactersIgnoringModifiers == "n"
+    }
+
+    var isControlP: Bool {
+        let flags = modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return flags == .control && charactersIgnoringModifiers == "p"
+    }
 }
