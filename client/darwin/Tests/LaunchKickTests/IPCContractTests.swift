@@ -1,5 +1,5 @@
-import XCTest
 @testable import LaunchKick
+import XCTest
 
 final class IPCContractTests: XCTestCase {
     private let contract = IPCContract()
@@ -85,13 +85,12 @@ final class IPCContractTests: XCTestCase {
     }
 
     private func fixture(_ name: String) throws -> String {
-        let data = try Data(contentsOf: repoRoot().appendingPathComponent("ipc/fixtures/\(name)"))
-        return String(decoding: data, as: UTF8.self)
+        try String(contentsOf: repoRoot().appendingPathComponent("ipc/fixtures/\(name)"), encoding: .utf8)
     }
 
     private func repoRoot() -> URL {
         var url = URL(fileURLWithPath: #filePath)
-        while url.lastPathComponent != "launch-kick" && url.path != url.deletingLastPathComponent().path {
+        while url.lastPathComponent != "launch-kick", url.path != url.deletingLastPathComponent().path {
             url.deleteLastPathComponent()
         }
         return url

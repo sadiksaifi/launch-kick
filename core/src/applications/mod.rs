@@ -233,7 +233,12 @@ fn fallback_name(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    static NEXT_TEMP_DIR_ID: AtomicUsize = AtomicUsize::new(0);
 
     #[cfg(unix)]
     use std::os::unix::process::ExitStatusExt;
@@ -398,6 +403,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("launchkick-apps-{nanos}"))
+        let id = NEXT_TEMP_DIR_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "launchkick-apps-{}-{nanos}-{id}",
+            std::process::id()
+        ))
     }
 }

@@ -55,7 +55,7 @@ struct IPCContract {
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
-    func encodeClientLine<Message: Encodable>(_ message: Message) throws -> String {
+    func encodeClientLine(_ message: some Encodable) throws -> String {
         let data = try encoder.encode(message)
         guard let json = String(data: data, encoding: .utf8) else {
             throw IPCContractError.invalidUTF8

@@ -36,14 +36,14 @@ final class CoreIPC {
         guard let message = try? contract.decodeServerLine(line) else { return }
 
         switch message {
-        case .results(let query, let results):
+        case let .results(query, results):
             onResults?(query, results)
-        case .actionResult(let resultID, let actionID, let ok, let error):
+        case let .actionResult(resultID, actionID, ok, error):
             onActionResult?(resultID, actionID, ok, error)
         }
     }
 
-    private func sendToCore<Message: Encodable>(_ message: Message) {
+    private func sendToCore(_ message: some Encodable) {
         guard
             let line = try? contract.encodeClientLine(message),
             let data = line.data(using: .utf8)

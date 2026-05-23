@@ -1,0 +1,12 @@
+# SwiftFormat configuration for the Darwin platform client.
+# Keep this repo-level so editor integrations and CI use the same formatting rules.
+
+--swiftversion 5.9
+--indent 4
+--linebreaks lf
+--trimwhitespace always
+--self remove
+--semicolons never
+--trailing-commas always
+--exclude .build
+--exclude client/darwin/.build

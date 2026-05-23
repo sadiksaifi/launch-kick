@@ -19,3 +19,12 @@ ipc/fixtures/    Shared Rust/Swift IPC contract fixtures
 ```
 
 Platform clients communicate with the Rust core over newline-delimited JSON IPC. The IPC vocabulary is launcher-oriented: `launcher::query`, `launcher::execute`, `launcher::results`, and `launcher::action::result`.
+
+## Development
+
+```bash
+just doctor
+just ci
+```
+
+The Justfile uses Rust and Swift tool names for language-specific workflows: `rust-check`, `rust-test`, `clippy`, `rustfmt`, `swift-build`, `swift-test`, `swiftlint`, and `swiftformat`.
