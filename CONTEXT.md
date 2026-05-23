@@ -18,6 +18,8 @@
 - **Action binding** — the core-owned association between a launcher result action ID and the source-specific action execution behavior. Launcher session state stores bindings but does not inspect source-specific action details.
 - **Action execution** — core-owned behavior for running an action and returning success or failure to the platform client.
 - **Launcher session state** — the core-owned memory of the current query, visible launcher results, known launcher results, and action bindings that can be executed.
+- **Launcher interaction** — the Darwin platform client policy module that translates user intents and core events into local launcher state changes plus UI/IPC effects. It keeps AppKit as an adapter for rendering and effect execution.
 - **Application discovery/launch** — a source-specific core implementation for discovering launchable macOS applications and executing the app-open action.
-- **Darwin IPC adapter** — the Darwin platform client adapter that owns `FileHandle` IO and NDJSON stream semantics; the IPC contract owns the message vocabulary.
+- **Darwin IPC adapter** — the Darwin platform client adapter that maps launcher-domain IPC intents/events to the IPC contract while delegating `FileHandle` IO and NDJSON stream semantics to the Darwin IPC stream.
+- **Darwin IPC stream** — the Darwin platform client module that owns `FileHandle` IO and NDJSON line stream semantics. It does not own IPC contract message vocabulary or launcher interaction policy.
 - **Platform client process lifecycle** — the core runtime concern for spawning, wiring stdio for, and waiting on the active platform client process. It is separate from IPC transport and Core session behavior.

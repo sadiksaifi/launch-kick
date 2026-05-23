@@ -21,13 +21,6 @@ impl CoreSession {
     }
 
     #[cfg(test)]
-    pub(crate) fn with_applications(applications: crate::applications::Applications) -> Self {
-        Self::with_command_sources(CommandSources::new(vec![Box::new(
-            application_source::ApplicationCommandSource::with_applications(applications),
-        )]))
-    }
-
-    #[cfg(test)]
     pub(crate) fn with_command_sources(command_sources: CommandSources) -> Self {
         Self {
             command_sources,
@@ -81,63 +74,65 @@ impl CoreSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::applications::Applications;
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        time::{SystemTime, UNIX_EPOCH},
+    use crate::{
+        ipc::{LauncherAction, LauncherResult},
+        launcher::{
+            action::{ActionBinding, ActionExecutionError, ActionExecutor},
+            command_source::{CommandSource, CommandSourceError},
+            session_state::LauncherResultRecord,
+        },
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
     };
 
-    #[cfg(unix)]
-    use std::os::unix::process::ExitStatusExt;
-
     #[test]
-    fn query_message_returns_application_results() {
-        let root = unique_temp_dir();
-        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
-        let mut session =
-            CoreSession::with_applications(test_applications(vec![root.clone()], true));
+    fn query_message_returns_command_source_results() {
+        let mut session = CoreSession::with_command_sources(CommandSources::new(vec![Box::new(
+            FakeCommandSource::new(vec![record("command:safari", "Safari", Ok(()))]),
+        )]));
 
         let response = session.handle_client_message(ClientMessage::Query {
             query: String::new(),
         });
 
-        let safari_path = canonical_string(&root.join("Safari.app"));
         assert_eq!(
             response,
             vec![ServerMessage::Results {
                 query: String::new(),
-                results: vec![crate::ipc::LauncherResult {
-                    id: format!("application:{safari_path}"),
+                results: vec![LauncherResult {
+                    id: "command:safari".to_string(),
                     title: "Safari".to_string(),
-                    subtitle: Some(safari_path.clone()),
-                    source: "applications".to_string(),
-                    icon: Some(crate::ipc::IconDescriptor {
-                        kind: "file".to_string(),
-                        value: safari_path,
-                    }),
-                    actions: vec![crate::ipc::LauncherAction {
+                    subtitle: None,
+                    source: "test".to_string(),
+                    icon: None,
+                    actions: vec![LauncherAction {
                         id: "open".to_string(),
                         title: "Open".to_string(),
                     }],
                 }]
             }]
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn query_message_filters_and_ranks_results() {
-        let root = unique_temp_dir();
-        fs::create_dir_all(root.join("Notes.app/Contents")).unwrap();
-        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
-        fs::create_dir_all(root.join("Safe Exam Browser.app/Contents")).unwrap();
-        let mut session =
-            CoreSession::with_applications(test_applications(vec![root.clone()], true));
+    fn query_message_uses_registry_policy() {
+        let mut session = CoreSession::with_command_sources(CommandSources::new(vec![
+            Box::new(FakeCommandSource::new(vec![record(
+                "command:one",
+                "One",
+                Ok(()),
+            )])),
+            Box::new(FakeCommandSource::new(vec![record(
+                "command:two",
+                "Two",
+                Ok(()),
+            )])),
+        ]));
 
         let response = session.handle_client_message(ClientMessage::Query {
-            query: "saf".to_string(),
+            query: "anything".to_string(),
         });
 
         let [ServerMessage::Results { results, .. }] = response.as_slice() else {
@@ -147,184 +142,257 @@ mod tests {
             .iter()
             .map(|result| result.title.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(titles, vec!["Safari", "Safe Exam Browser"]);
-
-        let _ = fs::remove_dir_all(root);
+        assert_eq!(titles, vec!["One", "Two"]);
     }
 
-    #[cfg(unix)]
     #[test]
-    fn execute_message_returns_success_result_for_current_application_result() {
-        let root = unique_temp_dir();
-        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
-        let safari_path = canonical_string(&root.join("Safari.app"));
-        let mut session =
-            CoreSession::with_applications(test_applications(vec![root.clone()], true));
+    fn execute_message_returns_success_result_for_current_result() {
+        let executions = Arc::new(AtomicUsize::new(0));
+        let mut session = CoreSession::with_command_sources(CommandSources::new(vec![Box::new(
+            FakeCommandSource::new(vec![record_with_counter(
+                "command:safari",
+                "Safari",
+                Arc::clone(&executions),
+            )]),
+        )]));
         session.handle_client_message(ClientMessage::Query {
             query: String::new(),
         });
 
         let response = session.handle_client_message(ClientMessage::Execute {
-            result_id: format!("application:{safari_path}"),
+            result_id: "command:safari".to_string(),
             action_id: "open".to_string(),
         });
 
         assert_eq!(
             response,
             vec![ServerMessage::ActionResult {
-                result_id: format!("application:{safari_path}"),
+                result_id: "command:safari".to_string(),
                 action_id: "open".to_string(),
                 ok: true,
                 error: None,
             }]
         );
-
-        let _ = fs::remove_dir_all(root);
+        assert_eq!(executions.load(Ordering::Relaxed), 1);
     }
 
-    #[cfg(unix)]
     #[test]
     fn execute_message_can_use_a_known_result_after_a_new_query_arrives() {
-        let root = unique_temp_dir();
-        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
-        let safari_path = canonical_string(&root.join("Safari.app"));
-        let mut session =
-            CoreSession::with_applications(test_applications(vec![root.clone()], true));
+        let executions = Arc::new(AtomicUsize::new(0));
+        let mut session = CoreSession::with_command_sources(CommandSources::new(vec![Box::new(
+            QueryAwareCommandSource::new(
+                "saf",
+                vec![record_with_counter(
+                    "command:safari",
+                    "Safari",
+                    Arc::clone(&executions),
+                )],
+            ),
+        )]));
         session.handle_client_message(ClientMessage::Query {
-            query: String::new(),
+            query: "saf".to_string(),
         });
         session.handle_client_message(ClientMessage::Query {
-            query: "does not match visible result yet".to_string(),
+            query: "missing".to_string(),
         });
 
         let response = session.handle_client_message(ClientMessage::Execute {
-            result_id: format!("application:{safari_path}"),
+            result_id: "command:safari".to_string(),
             action_id: "open".to_string(),
         });
 
         assert_eq!(
             response,
             vec![ServerMessage::ActionResult {
-                result_id: format!("application:{safari_path}"),
+                result_id: "command:safari".to_string(),
                 action_id: "open".to_string(),
                 ok: true,
                 error: None,
             }]
         );
-
-        let _ = fs::remove_dir_all(root);
+        assert_eq!(executions.load(Ordering::Relaxed), 1);
     }
 
-    #[cfg(unix)]
     #[test]
     fn execute_message_returns_failure_result() {
-        let root = unique_temp_dir();
-        fs::create_dir_all(root.join("Missing.app/Contents")).unwrap();
-        let missing_path = canonical_string(&root.join("Missing.app"));
-        let mut session =
-            CoreSession::with_applications(test_applications(vec![root.clone()], false));
+        let mut session = CoreSession::with_command_sources(CommandSources::new(vec![Box::new(
+            FakeCommandSource::new(vec![record("command:broken", "Broken", Err("boom"))]),
+        )]));
         session.handle_client_message(ClientMessage::Query {
             query: String::new(),
         });
 
         let response = session.handle_client_message(ClientMessage::Execute {
-            result_id: format!("application:{missing_path}"),
+            result_id: "command:broken".to_string(),
             action_id: "open".to_string(),
         });
 
         assert_eq!(
             response,
             vec![ServerMessage::ActionResult {
-                result_id: format!("application:{missing_path}"),
+                result_id: "command:broken".to_string(),
                 action_id: "open".to_string(),
                 ok: false,
-                error: Some(format!(
-                    "failed to launch {missing_path}: open exited with status 1"
-                )),
+                error: Some("boom".to_string()),
             }]
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn execute_message_rejects_unknown_result() {
-        let mut session = CoreSession::with_applications(test_applications(Vec::new(), true));
+        let mut session = CoreSession::with_command_sources(CommandSources::new(Vec::new()));
 
         let response = session.handle_client_message(ClientMessage::Execute {
-            result_id: "application:/Applications/Safari.app".to_string(),
+            result_id: "command:missing".to_string(),
             action_id: "open".to_string(),
         });
 
         assert_eq!(
             response,
             vec![ServerMessage::ActionResult {
-                result_id: "application:/Applications/Safari.app".to_string(),
+                result_id: "command:missing".to_string(),
                 action_id: "open".to_string(),
                 ok: false,
-                error: Some("unknown result: application:/Applications/Safari.app".to_string()),
+                error: Some("unknown result: command:missing".to_string()),
             }]
         );
     }
 
     #[test]
     fn execute_message_rejects_unknown_action_for_known_result() {
-        let root = unique_temp_dir();
-        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
-        let safari_path = canonical_string(&root.join("Safari.app"));
-        let mut session =
-            CoreSession::with_applications(test_applications(vec![root.clone()], true));
+        let mut session = CoreSession::with_command_sources(CommandSources::new(vec![Box::new(
+            FakeCommandSource::new(vec![record("command:safari", "Safari", Ok(()))]),
+        )]));
         session.handle_client_message(ClientMessage::Query {
             query: String::new(),
         });
 
         let response = session.handle_client_message(ClientMessage::Execute {
-            result_id: format!("application:{safari_path}"),
+            result_id: "command:safari".to_string(),
             action_id: "rename".to_string(),
         });
 
         assert_eq!(
             response,
             vec![ServerMessage::ActionResult {
-                result_id: format!("application:{safari_path}"),
+                result_id: "command:safari".to_string(),
                 action_id: "rename".to_string(),
                 ok: false,
                 error: Some("unknown action: rename".to_string()),
             }]
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 
-    #[cfg(unix)]
-    fn test_applications(roots: Vec<PathBuf>, launch_succeeds: bool) -> Applications {
-        Applications::with_roots_and_launcher_for_test(roots, move |_| {
-            let status = if launch_succeeds {
-                ExitStatusExt::from_raw(0)
-            } else {
-                ExitStatusExt::from_raw(1 << 8)
-            };
-            Ok(status)
+    fn record(id: &str, title: &str, outcome: Result<(), &str>) -> LauncherResultRecord {
+        LauncherResultRecord::new(LauncherResult {
+            id: id.to_string(),
+            title: title.to_string(),
+            subtitle: None,
+            source: "test".to_string(),
+            icon: None,
+            actions: Vec::new(),
         })
+        .with_action(ActionBinding::new(
+            LauncherAction {
+                id: "open".to_string(),
+                title: "Open".to_string(),
+            },
+            FakeAction::new(outcome.map_err(ToOwned::to_owned)),
+        ))
     }
 
-    #[cfg(not(unix))]
-    fn test_applications(roots: Vec<PathBuf>, _launch_succeeds: bool) -> Applications {
-        Applications::with_roots_and_launcher_for_test(roots, |_| unimplemented!())
+    fn record_with_counter(
+        id: &str,
+        title: &str,
+        executions: Arc<AtomicUsize>,
+    ) -> LauncherResultRecord {
+        LauncherResultRecord::new(LauncherResult {
+            id: id.to_string(),
+            title: title.to_string(),
+            subtitle: None,
+            source: "test".to_string(),
+            icon: None,
+            actions: Vec::new(),
+        })
+        .with_action(ActionBinding::new(
+            LauncherAction {
+                id: "open".to_string(),
+                title: "Open".to_string(),
+            },
+            CountingAction { executions },
+        ))
     }
 
-    fn canonical_string(path: &Path) -> String {
-        fs::canonicalize(path)
-            .unwrap()
-            .to_string_lossy()
-            .into_owned()
+    struct FakeCommandSource {
+        records: Vec<LauncherResultRecord>,
     }
 
-    fn unique_temp_dir() -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("launchkick-session-{nanos}"))
+    impl FakeCommandSource {
+        fn new(records: Vec<LauncherResultRecord>) -> Self {
+            Self { records }
+        }
+    }
+
+    impl CommandSource for FakeCommandSource {
+        fn results_for_query(
+            &self,
+            _query: &str,
+        ) -> Result<Vec<LauncherResultRecord>, CommandSourceError> {
+            Ok(self.records.clone())
+        }
+    }
+
+    struct QueryAwareCommandSource {
+        matching_query: String,
+        records: Vec<LauncherResultRecord>,
+    }
+
+    impl QueryAwareCommandSource {
+        fn new(matching_query: &str, records: Vec<LauncherResultRecord>) -> Self {
+            Self {
+                matching_query: matching_query.to_string(),
+                records,
+            }
+        }
+    }
+
+    impl CommandSource for QueryAwareCommandSource {
+        fn results_for_query(
+            &self,
+            query: &str,
+        ) -> Result<Vec<LauncherResultRecord>, CommandSourceError> {
+            if query == self.matching_query {
+                Ok(self.records.clone())
+            } else {
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    struct FakeAction {
+        outcome: Result<(), String>,
+    }
+
+    impl FakeAction {
+        fn new(outcome: Result<(), String>) -> Self {
+            Self { outcome }
+        }
+    }
+
+    impl ActionExecutor for FakeAction {
+        fn execute(&self) -> Result<(), ActionExecutionError> {
+            self.outcome.clone().map_err(ActionExecutionError::new)
+        }
+    }
+
+    struct CountingAction {
+        executions: Arc<AtomicUsize>,
+    }
+
+    impl ActionExecutor for CountingAction {
+        fn execute(&self) -> Result<(), ActionExecutionError> {
+            self.executions.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
     }
 }

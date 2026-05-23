@@ -1,3 +1,4 @@
+use crate::ipc::LauncherAction;
 use std::{error::Error, fmt, sync::Arc};
 
 pub(crate) trait ActionExecutor: Send + Sync {
@@ -6,14 +7,24 @@ pub(crate) trait ActionExecutor: Send + Sync {
 
 #[derive(Clone)]
 pub(crate) struct ActionBinding {
+    action: LauncherAction,
     executor: Arc<dyn ActionExecutor>,
 }
 
 impl ActionBinding {
-    pub(crate) fn new(executor: impl ActionExecutor + 'static) -> Self {
+    pub(crate) fn new(action: LauncherAction, executor: impl ActionExecutor + 'static) -> Self {
         Self {
+            action,
             executor: Arc::new(executor),
         }
+    }
+
+    pub(crate) fn id(&self) -> &str {
+        &self.action.id
+    }
+
+    pub(crate) fn renderable_action(&self) -> &LauncherAction {
+        &self.action
     }
 
     pub(crate) fn execute(&self) -> Result<(), ActionExecutionError> {
@@ -23,7 +34,9 @@ impl ActionBinding {
 
 impl fmt::Debug for ActionBinding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ActionBinding").finish_non_exhaustive()
+        f.debug_struct("ActionBinding")
+            .field("action", &self.action)
+            .finish_non_exhaustive()
     }
 }
 

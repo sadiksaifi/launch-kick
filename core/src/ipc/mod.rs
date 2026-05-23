@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt};
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
     #[serde(rename = "launcher::query")]
@@ -37,7 +37,7 @@ pub struct IconDescriptor {
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
     #[serde(rename = "launcher::results")]
@@ -92,90 +92,28 @@ pub fn encode_server_line(message: &ServerMessage) -> Result<String, IpcError> {
 mod tests {
     use super::*;
 
-    const CLIENT_QUERY_EMPTY: &str = include_str!("../../../ipc/fixtures/client-query-empty.json");
-    const CLIENT_QUERY_SAFARI: &str =
-        include_str!("../../../ipc/fixtures/client-query-safari.json");
-    const CLIENT_EXECUTE_RESULT: &str =
-        include_str!("../../../ipc/fixtures/client-execute-result.json");
-    const SERVER_RESULTS: &str = include_str!("../../../ipc/fixtures/server-results.json");
-    const SERVER_ACTION_SUCCEEDED: &str =
-        include_str!("../../../ipc/fixtures/server-action-succeeded.json");
-    const SERVER_ACTION_FAILED: &str =
-        include_str!("../../../ipc/fixtures/server-action-failed.json");
     const MANIFEST: &str = include_str!("../../../ipc/fixtures/manifest.json");
 
     #[test]
-    fn decodes_client_query_fixture() {
-        let message = decode_client_line(CLIENT_QUERY_EMPTY).unwrap();
+    fn manifest_drives_client_fixture_conformance() {
+        for fixture_case in manifest().cases_for_direction("client_to_core") {
+            let fixture = fixture_json(&fixture_case.file);
+            let message = decode_client_line(&fixture).unwrap();
+            let encoded = serde_json::to_string(&message).unwrap();
 
-        assert_eq!(
-            message,
-            ClientMessage::Query {
-                query: String::new()
-            }
-        );
+            assert_json_eq(&encoded, &fixture);
+        }
     }
 
     #[test]
-    fn decodes_client_query_text_fixture() {
-        let message = decode_client_line(CLIENT_QUERY_SAFARI).unwrap();
+    fn manifest_drives_server_fixture_conformance() {
+        for fixture_case in manifest().cases_for_direction("core_to_client") {
+            let fixture = fixture_json(&fixture_case.file);
+            let message: ServerMessage = serde_json::from_str(&fixture).unwrap();
+            let encoded = encode_server_line(&message).unwrap();
 
-        assert_eq!(
-            message,
-            ClientMessage::Query {
-                query: "saf".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn decodes_client_execute_fixture() {
-        let message = decode_client_line(CLIENT_EXECUTE_RESULT).unwrap();
-
-        assert_eq!(
-            message,
-            ClientMessage::Execute {
-                result_id: "application:/Applications/Safari.app".to_string(),
-                action_id: "open".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn encodes_server_results_fixture() {
-        let line = encode_server_line(&ServerMessage::Results {
-            query: String::new(),
-            results: vec![safari_result()],
-        })
-        .unwrap();
-
-        assert_json_line_eq(&line, SERVER_RESULTS);
-    }
-
-    #[test]
-    fn encodes_server_action_success_fixture() {
-        let line = encode_server_line(&ServerMessage::ActionResult {
-            result_id: "application:/Applications/Safari.app".to_string(),
-            action_id: "open".to_string(),
-            ok: true,
-            error: None,
-        })
-        .unwrap();
-
-        assert_json_line_eq(&line, SERVER_ACTION_SUCCEEDED);
-    }
-
-    #[test]
-    fn encodes_server_action_failure_fixture() {
-        let line = encode_server_line(&ServerMessage::ActionResult {
-            result_id: "application:/Applications/Missing.app".to_string(),
-            action_id: "open".to_string(),
-            ok: false,
-            error: Some("launch failed".to_string()),
-        })
-        .unwrap();
-
-        assert_json_line_eq(&line, SERVER_ACTION_FAILED);
+            assert_json_line_eq(&encoded, &fixture);
+        }
     }
 
     #[test]
@@ -246,7 +184,7 @@ mod tests {
     #[test]
     fn manifest_case_metadata_matches_fixture_types() {
         for fixture_case in manifest().cases {
-            let json = std::fs::read_to_string(fixtures_dir().join(&fixture_case.file)).unwrap();
+            let json = fixture_json(&fixture_case.file);
             let value: serde_json::Value = serde_json::from_str(&json).unwrap();
             assert_eq!(
                 value["type"].as_str(),
@@ -264,32 +202,23 @@ mod tests {
         }
     }
 
-    fn safari_result() -> LauncherResult {
-        LauncherResult {
-            id: "application:/Applications/Safari.app".to_string(),
-            title: "Safari".to_string(),
-            subtitle: Some("/Applications/Safari.app".to_string()),
-            source: "applications".to_string(),
-            icon: Some(IconDescriptor {
-                kind: "file".to_string(),
-                value: "/Applications/Safari.app".to_string(),
-            }),
-            actions: vec![LauncherAction {
-                id: "open".to_string(),
-                title: "Open".to_string(),
-            }],
-        }
-    }
-
     fn assert_json_line_eq(actual_line: &str, expected_json: &str) {
         assert!(actual_line.ends_with('\n'));
-        let actual: serde_json::Value = serde_json::from_str(actual_line.trim_end()).unwrap();
+        assert_json_eq(actual_line.trim_end(), expected_json);
+    }
+
+    fn assert_json_eq(actual_json: &str, expected_json: &str) {
+        let actual: serde_json::Value = serde_json::from_str(actual_json).unwrap();
         let expected: serde_json::Value = serde_json::from_str(expected_json).unwrap();
         assert_eq!(actual, expected);
     }
 
     fn manifest() -> FixtureManifest {
         serde_json::from_str(MANIFEST).unwrap()
+    }
+
+    fn fixture_json(file: &str) -> String {
+        std::fs::read_to_string(fixtures_dir().join(file)).unwrap()
     }
 
     fn fixtures_dir() -> std::path::PathBuf {
@@ -299,6 +228,14 @@ mod tests {
     #[derive(serde::Deserialize)]
     struct FixtureManifest {
         cases: Vec<FixtureCase>,
+    }
+
+    impl FixtureManifest {
+        fn cases_for_direction(&self, direction: &str) -> impl Iterator<Item = &FixtureCase> {
+            self.cases
+                .iter()
+                .filter(move |fixture_case| fixture_case.direction == direction)
+        }
     }
 
     #[derive(serde::Deserialize)]

@@ -1,5 +1,5 @@
 use super::action::ActionBinding;
-use crate::ipc::{LauncherAction, LauncherResult};
+use crate::ipc::LauncherResult;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -16,14 +16,19 @@ impl LauncherResultRecord {
         }
     }
 
-    pub(crate) fn with_action(mut self, action: LauncherAction, binding: ActionBinding) -> Self {
-        self.actions.insert(action.id.clone(), binding);
+    pub(crate) fn with_action(mut self, binding: ActionBinding) -> Self {
+        let action = binding.renderable_action().clone();
+        self.actions.insert(binding.id().to_string(), binding);
         self.result.actions.push(action);
         self
     }
 
     pub(crate) fn as_result(&self) -> &LauncherResult {
         &self.result
+    }
+
+    pub(crate) fn result_id(&self) -> &str {
+        &self.result.id
     }
 
     fn into_parts(self) -> (LauncherResult, HashMap<String, ActionBinding>) {
@@ -83,20 +88,20 @@ impl LauncherSessionState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::launcher::action::{ActionExecutionError, ActionExecutor};
+    use crate::{
+        ipc::{LauncherAction, LauncherResult},
+        launcher::action::{ActionExecutionError, ActionExecutor},
+    };
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
 
     #[test]
-    fn replace_results_tracks_visible_results_and_known_actions() {
+    fn replace_results_tracks_visible_results_and_known_actions_from_one_binding() {
         let mut state = LauncherSessionState::default();
         let executions = Arc::new(AtomicUsize::new(0));
-        let record = result_record(
-            "application:/Applications/Safari.app",
-            Arc::clone(&executions),
-        );
+        let record = result_record("command:safari", Arc::clone(&executions));
 
         state.replace_results("saf".to_string(), vec![record]);
 
@@ -104,7 +109,7 @@ mod tests {
         assert_eq!(state.visible_results().len(), 1);
         assert_eq!(state.visible_results()[0].actions[0].id, "open");
         state
-            .resolve_action("application:/Applications/Safari.app", "open")
+            .resolve_action("command:safari", "open")
             .unwrap()
             .execute()
             .unwrap();
@@ -117,16 +122,13 @@ mod tests {
         let executions = Arc::new(AtomicUsize::new(0));
         state.replace_results(
             String::new(),
-            vec![result_record(
-                "application:/Applications/Safari.app",
-                Arc::clone(&executions),
-            )],
+            vec![result_record("command:safari", Arc::clone(&executions))],
         );
         state.replace_results("missing".to_string(), Vec::new());
 
         assert!(state.visible_results().is_empty());
         state
-            .resolve_action("application:/Applications/Safari.app", "open")
+            .resolve_action("command:safari", "open")
             .unwrap()
             .execute()
             .unwrap();
@@ -139,41 +141,51 @@ mod tests {
         state.replace_results(
             String::new(),
             vec![result_record(
-                "application:/Applications/Safari.app",
+                "command:safari",
                 Arc::new(AtomicUsize::new(0)),
             )],
         );
 
         assert_eq!(
             state
-                .resolve_action("application:/Applications/Safari.app", "rename")
+                .resolve_action("command:safari", "rename")
                 .unwrap_err(),
             ResolveActionError::UnknownAction
         );
         assert_eq!(
-            state
-                .resolve_action("application:/Applications/Missing.app", "open")
-                .unwrap_err(),
+            state.resolve_action("command:missing", "open").unwrap_err(),
             ResolveActionError::UnknownResult
         );
     }
 
+    #[test]
+    fn result_record_exposes_action_metadata_from_binding() {
+        let record = result_record("command:safari", Arc::new(AtomicUsize::new(0)));
+
+        assert_eq!(record.result_id(), "command:safari");
+        assert_eq!(record.as_result().actions.len(), 1);
+        assert_eq!(record.as_result().actions[0].id, "open");
+        assert_eq!(record.as_result().actions[0].title, "Open");
+    }
+
     fn result_record(id: &str, executions: Arc<AtomicUsize>) -> LauncherResultRecord {
-        LauncherResultRecord::new(LauncherResult {
-            id: id.to_string(),
-            title: "Safari".to_string(),
-            subtitle: Some("/Applications/Safari.app".to_string()),
-            source: "applications".to_string(),
-            icon: None,
-            actions: Vec::new(),
-        })
-        .with_action(
+        let binding = ActionBinding::new(
             LauncherAction {
                 id: "open".to_string(),
                 title: "Open".to_string(),
             },
-            ActionBinding::new(CountingAction { executions }),
-        )
+            CountingAction { executions },
+        );
+
+        LauncherResultRecord::new(LauncherResult {
+            id: id.to_string(),
+            title: "Safari".to_string(),
+            subtitle: None,
+            source: "test".to_string(),
+            icon: None,
+            actions: Vec::new(),
+        })
+        .with_action(binding)
     }
 
     struct CountingAction {

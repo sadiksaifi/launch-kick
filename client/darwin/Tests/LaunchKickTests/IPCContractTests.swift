@@ -4,62 +4,22 @@ import XCTest
 final class IPCContractTests: XCTestCase {
     private let contract = IPCContract()
 
-    func testEncodesQueryRequest() throws {
-        let line = try contract.encodeClientLine(.query(""))
+    func testManifestDrivesClientFixtureConformance() throws {
+        for fixtureCase in try fixtureCatalog().cases.filter({ $0.direction == "client_to_core" }) {
+            let message = try clientMessage(fromFixture: fixtureCase.file)
+            let line = try contract.encodeClientLine(message)
 
-        try XCTAssertJSONLine(line, equalsFixture: "client-query-empty.json")
+            try XCTAssertJSONLine(line, equalsFixture: fixtureCase.file)
+        }
     }
 
-    func testEncodesTextQueryRequest() throws {
-        let line = try contract.encodeClientLine(.query("saf"))
+    func testManifestDrivesServerFixtureConformance() throws {
+        for fixtureCase in try fixtureCatalog().cases.filter({ $0.direction == "core_to_client" }) {
+            let message = try contract.decodeServerLine(fixture(fixtureCase.file))
+            let normalized = try normalizedServerJSON(message)
 
-        try XCTAssertJSONLine(line, equalsFixture: "client-query-safari.json")
-    }
-
-    func testEncodesExecuteRequest() throws {
-        let line = try contract.encodeClientLine(.execute(
-            resultID: "application:/Applications/Safari.app",
-            actionID: "open"
-        ))
-
-        try XCTAssertJSONLine(line, equalsFixture: "client-execute-result.json")
-    }
-
-    func testDecodesResultsResponse() throws {
-        let message = try contract.decodeServerLine(fixture("server-results.json"))
-
-        XCTAssertEqual(
-            message,
-            .results(query: "", results: [safariResult()])
-        )
-    }
-
-    func testDecodesActionSuccessResponse() throws {
-        let message = try contract.decodeServerLine(fixture("server-action-succeeded.json"))
-
-        XCTAssertEqual(
-            message,
-            .actionResult(
-                resultID: "application:/Applications/Safari.app",
-                actionID: "open",
-                ok: true,
-                error: nil
-            )
-        )
-    }
-
-    func testDecodesActionFailureResponse() throws {
-        let message = try contract.decodeServerLine(fixture("server-action-failed.json"))
-
-        XCTAssertEqual(
-            message,
-            .actionResult(
-                resultID: "application:/Applications/Missing.app",
-                actionID: "open",
-                ok: false,
-                error: "launch failed"
-            )
-        )
+            try XCTAssertJSON(normalized, equalsFixture: fixtureCase.file)
+        }
     }
 
     func testRejectsUnknownServerMessage() throws {
@@ -101,20 +61,74 @@ final class IPCContractTests: XCTestCase {
         }
     }
 
-    private func safariResult() -> LauncherResult {
-        LauncherResult(
-            id: "application:/Applications/Safari.app",
-            title: "Safari",
-            subtitle: "/Applications/Safari.app",
-            source: "applications",
-            icon: IconDescriptor(kind: "file", value: "/Applications/Safari.app"),
-            actions: [LauncherAction(id: "open", title: "Open")]
-        )
+    private func clientMessage(fromFixture fixtureName: String) throws -> ClientMessage {
+        let data = try Data(contentsOf: fixtureURL(fixtureName))
+        let json = try JSONSerialization.jsonObject(with: data) as? NSDictionary
+        let type = try XCTUnwrap(json?["type"] as? String)
+
+        switch type {
+        case "launcher::query":
+            return try .query(XCTUnwrap(json?["query"] as? String))
+        case "launcher::execute":
+            return try .execute(
+                resultID: XCTUnwrap(json?["result_id"] as? String),
+                actionID: XCTUnwrap(json?["action_id"] as? String)
+            )
+        default:
+            XCTFail("unsupported client fixture type \(type)")
+            return .query("")
+        }
+    }
+
+    private func normalizedServerJSON(_ message: ServerMessage) throws -> String {
+        let payload: [String: Any]
+        switch message {
+        case let .results(query, results):
+            payload = [
+                "type": "launcher::results",
+                "query": query,
+                "results": results.map(resultJSON),
+            ]
+        case let .actionResult(resultID, actionID, ok, error):
+            var result: [String: Any] = [
+                "type": "launcher::action::result",
+                "result_id": resultID,
+                "action_id": actionID,
+                "ok": ok,
+            ]
+            if let error {
+                result["error"] = error
+            }
+            payload = result
+        }
+
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    private func resultJSON(_ result: LauncherResult) -> [String: Any] {
+        var json: [String: Any] = [
+            "id": result.id,
+            "title": result.title,
+            "source": result.source,
+            "actions": result.actions.map { ["id": $0.id, "title": $0.title] },
+        ]
+        if let subtitle = result.subtitle {
+            json["subtitle"] = subtitle
+        }
+        if let icon = result.icon {
+            json["icon"] = ["kind": icon.kind, "value": icon.value]
+        }
+        return json
     }
 
     private func XCTAssertJSONLine(_ line: String, equalsFixture fixtureName: String, file: StaticString = #filePath, line sourceLine: UInt = #line) throws {
         XCTAssertTrue(line.hasSuffix("\n"), file: file, line: sourceLine)
-        let actual = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? NSDictionary
+        try XCTAssertJSON(String(line.dropLast()), equalsFixture: fixtureName, file: file, line: sourceLine)
+    }
+
+    private func XCTAssertJSON(_ json: String, equalsFixture fixtureName: String, file: StaticString = #filePath, line sourceLine: UInt = #line) throws {
+        let actual = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary
         let expected = try JSONSerialization.jsonObject(with: Data(fixture(fixtureName).utf8)) as? NSDictionary
         XCTAssertEqual(actual, expected, file: file, line: sourceLine)
     }
