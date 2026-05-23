@@ -57,7 +57,6 @@ final class CoreIPCStream {
         }
 
         output.write(data)
-        fflush(stdout)
     }
 
     private func handle(_ data: Data, onEvent: (CoreIPCStreamEvent) -> Void) {

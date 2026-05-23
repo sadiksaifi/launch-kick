@@ -39,13 +39,16 @@ impl CoreSession {
     }
 
     fn handle_query(&mut self, query: String) -> ServerMessage {
-        let records = self.command_sources.results_for_query(&query);
-        self.state.replace_results(query, records);
+        let records = self
+            .command_sources
+            .results_for_query(&query)
+            .into_records();
+        let (query, results) = self
+            .state
+            .replace_results(query, records)
+            .into_server_parts();
 
-        ServerMessage::Results {
-            query: self.state.current_query().to_string(),
-            results: self.state.visible_results().to_vec(),
-        }
+        ServerMessage::Results { query, results }
     }
 
     fn execute_action(&self, result_id: String, action_id: String) -> ServerMessage {

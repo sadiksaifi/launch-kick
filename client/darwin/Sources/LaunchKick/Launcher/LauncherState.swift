@@ -65,11 +65,6 @@ struct LauncherState: Equatable {
         return results[selectedIndex]
     }
 
-    func selectedExecuteIntent() -> ExecuteIntent? {
-        guard let result = selectedResult(), let action = result.actions.first else { return nil }
-        return ExecuteIntent(resultID: result.id, actionID: action.id)
-    }
-
     func result(at index: Int) -> LauncherResult? {
         guard results.indices.contains(index) else { return nil }
         return results[index]

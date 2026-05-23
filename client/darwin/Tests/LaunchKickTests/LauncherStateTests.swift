@@ -55,39 +55,6 @@ final class LauncherStateTests: XCTestCase {
         XCTAssertTrue(state.isVisible)
     }
 
-    func testSelectedExecuteIntentUsesSelectedResultFirstAction() {
-        var state = LauncherState()
-        state.replaceResults(results())
-        state.select(index: 1)
-
-        XCTAssertEqual(
-            state.selectedExecuteIntent(),
-            ExecuteIntent(resultID: "application:/Applications/Notes.app", actionID: "open")
-        )
-    }
-
-    func testSelectedExecuteIntentIsNilWithoutASelectedResult() {
-        let state = LauncherState()
-
-        XCTAssertNil(state.selectedExecuteIntent())
-    }
-
-    func testSelectedExecuteIntentIsNilWhenResultHasNoActions() {
-        var state = LauncherState()
-        state.replaceResults([
-            LauncherResult(
-                id: "command:empty",
-                title: "Empty",
-                subtitle: nil,
-                source: "test",
-                icon: nil,
-                actions: []
-            ),
-        ])
-
-        XCTAssertNil(state.selectedExecuteIntent())
-    }
-
     private func results() -> [LauncherResult] {
         [
             LauncherResult(

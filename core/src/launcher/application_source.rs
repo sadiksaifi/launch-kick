@@ -128,7 +128,6 @@ impl ActionExecutor for OpenApplicationAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::launcher::session_state::LauncherSessionState;
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -202,14 +201,13 @@ mod tests {
             vec![root.clone()],
             true,
         ));
-        let mut state = LauncherSessionState::default();
-        state.replace_results(String::new(), source.results_for_query("").unwrap());
-
-        state
-            .resolve_action(&format!("application:{safari_path}"), "open")
-            .unwrap()
-            .execute()
+        let records = source.results_for_query("").unwrap();
+        let record = records
+            .iter()
+            .find(|record| record.result_id() == format!("application:{safari_path}"))
             .unwrap();
+
+        record.action("open").unwrap().execute().unwrap();
 
         let _ = fs::remove_dir_all(root);
     }
@@ -224,14 +222,13 @@ mod tests {
             vec![root.clone()],
             false,
         ));
-        let mut state = LauncherSessionState::default();
-        state.replace_results(String::new(), source.results_for_query("").unwrap());
+        let records = source.results_for_query("").unwrap();
+        let record = records
+            .iter()
+            .find(|record| record.result_id() == format!("application:{missing_path}"))
+            .unwrap();
 
-        let error = state
-            .resolve_action(&format!("application:{missing_path}"), "open")
-            .unwrap()
-            .execute()
-            .unwrap_err();
+        let error = record.action("open").unwrap().execute().unwrap_err();
 
         assert_eq!(
             error.to_string(),

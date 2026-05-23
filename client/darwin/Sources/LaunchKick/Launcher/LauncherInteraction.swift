@@ -48,7 +48,7 @@ struct LauncherInteraction {
             state.select(index: index)
             return [.syncSelection]
         case .executeSelected:
-            guard let intent = state.selectedExecuteIntent() else { return [] }
+            guard let intent = selectedExecuteIntent() else { return [] }
             state.hide()
             return [.sendToCore(.execute(intent)), .hidePanel]
         }
@@ -67,6 +67,11 @@ struct LauncherInteraction {
 
     func result(at index: Int) -> LauncherResult? {
         state.result(at: index)
+    }
+
+    private func selectedExecuteIntent() -> ExecuteIntent? {
+        guard let result = state.selectedResult(), let action = result.actions.first else { return nil }
+        return ExecuteIntent(resultID: result.id, actionID: action.id)
     }
 
     private mutating func show() -> [LauncherEffect] {
