@@ -37,10 +37,12 @@ pub(crate) struct SuppressedSourceFailure {
 }
 
 impl SuppressedSourceFailure {
+    #[cfg(test)]
     pub(crate) fn source_index(&self) -> usize {
         self.source_index
     }
 
+    #[cfg(test)]
     pub(crate) fn message(&self) -> &str {
         &self.message
     }

@@ -31,6 +31,7 @@ impl LauncherResultRecord {
         &self.result.id
     }
 
+    #[cfg(test)]
     pub(crate) fn action(&self, action_id: &str) -> Option<&ActionBinding> {
         self.actions.get(action_id)
     }
