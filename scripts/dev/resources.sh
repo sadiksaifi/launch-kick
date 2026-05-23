@@ -59,7 +59,7 @@ BEGIN {
 {
     command = ""
     for (i = 8; i <= NF; i++) command = command (i == 8 ? "" : " ") $i
-    if (command ~ /scripts\/dev\/resources[.]sh/ || command ~ / awk /) next
+    if (command ~ /scripts\/dev\/resources[.]sh/ || command ~ /(^|[[:space:]])awk([[:space:]]|$)/) next
     if (!is_rust_core(command) && !is_swift_client(command)) next
 
     pid = $1
