@@ -1,6 +1,29 @@
 use crate::ipc::Application;
 use plist::Value;
-use std::{collections::HashSet, fs, path::{Path, PathBuf}};
+use std::{
+    collections::HashSet,
+    fs, io,
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+pub trait ApplicationService {
+    fn list_applications(&mut self) -> Vec<Application>;
+    fn launch_application(&mut self, path: &str) -> io::Result<()>;
+}
+
+pub struct SystemApplicationService;
+
+impl ApplicationService for SystemApplicationService {
+    fn list_applications(&mut self) -> Vec<Application> {
+        discover()
+    }
+
+    fn launch_application(&mut self, path: &str) -> io::Result<()> {
+        Command::new("open").arg(path).status()?;
+        Ok(())
+    }
+}
 
 pub fn discover() -> Vec<Application> {
     discover_in_roots(&default_application_roots())
