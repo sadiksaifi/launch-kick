@@ -31,15 +31,31 @@ impl LauncherResultRecord {
         &self.result.id
     }
 
+    pub(crate) fn action(&self, action_id: &str) -> Option<&ActionBinding> {
+        self.actions.get(action_id)
+    }
+
     fn into_parts(self) -> (LauncherResult, HashMap<String, ActionBinding>) {
         (self.result, self.actions)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ResolveActionError {
+pub(super) enum ResolveActionError {
     UnknownResult,
     UnknownAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VisibleLauncherResults {
+    query: String,
+    results: Vec<LauncherResult>,
+}
+
+impl VisibleLauncherResults {
+    pub(crate) fn into_server_parts(self) -> (String, Vec<LauncherResult>) {
+        (self.query, self.results)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -50,7 +66,11 @@ pub(crate) struct LauncherSessionState {
 }
 
 impl LauncherSessionState {
-    pub(crate) fn replace_results(&mut self, query: String, records: Vec<LauncherResultRecord>) {
+    pub(crate) fn replace_results(
+        &mut self,
+        query: String,
+        records: Vec<LauncherResultRecord>,
+    ) -> VisibleLauncherResults {
         self.current_query = query;
         self.visible_results.clear();
 
@@ -59,29 +79,30 @@ impl LauncherSessionState {
             self.known_actions.insert(result.id.clone(), actions);
             self.visible_results.push(result);
         }
+
+        VisibleLauncherResults {
+            query: self.current_query.clone(),
+            results: self.visible_results.clone(),
+        }
     }
 
-    pub(crate) fn current_query(&self) -> &str {
-        &self.current_query
-    }
-
-    pub(crate) fn visible_results(&self) -> &[LauncherResult] {
-        &self.visible_results
-    }
-
-    pub(crate) fn resolve_action(
+    pub(super) fn resolve_action(
         &self,
         result_id: &str,
         action_id: &str,
-    ) -> Result<ActionBinding, ResolveActionError> {
+    ) -> Result<&ActionBinding, ResolveActionError> {
         let Some(actions) = self.known_actions.get(result_id) else {
             return Err(ResolveActionError::UnknownResult);
         };
 
         actions
             .get(action_id)
-            .cloned()
             .ok_or(ResolveActionError::UnknownAction)
+    }
+
+    #[cfg(test)]
+    fn visible_result_count(&self) -> usize {
+        self.visible_results.len()
     }
 }
 
@@ -98,16 +119,17 @@ mod tests {
     };
 
     #[test]
-    fn replace_results_tracks_visible_results_and_known_actions_from_one_binding() {
+    fn replace_results_records_visible_snapshot_and_known_actions() {
         let mut state = LauncherSessionState::default();
         let executions = Arc::new(AtomicUsize::new(0));
         let record = result_record("command:safari", Arc::clone(&executions));
 
-        state.replace_results("saf".to_string(), vec![record]);
+        let visible = state.replace_results("saf".to_string(), vec![record]);
+        let (query, results) = visible.into_server_parts();
 
-        assert_eq!(state.current_query(), "saf");
-        assert_eq!(state.visible_results().len(), 1);
-        assert_eq!(state.visible_results()[0].actions[0].id, "open");
+        assert_eq!(query, "saf");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].actions[0].id, "open");
         state
             .resolve_action("command:safari", "open")
             .unwrap()
@@ -126,7 +148,7 @@ mod tests {
         );
         state.replace_results("missing".to_string(), Vec::new());
 
-        assert!(state.visible_results().is_empty());
+        assert_eq!(state.visible_result_count(), 0);
         state
             .resolve_action("command:safari", "open")
             .unwrap()
@@ -166,6 +188,7 @@ mod tests {
         assert_eq!(record.as_result().actions.len(), 1);
         assert_eq!(record.as_result().actions[0].id, "open");
         assert_eq!(record.as_result().actions[0].title, "Open");
+        assert!(record.action("open").is_some());
     }
 
     fn result_record(id: &str, executions: Arc<AtomicUsize>) -> LauncherResultRecord {
