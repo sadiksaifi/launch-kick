@@ -1,6 +1,8 @@
 import AppKit
 
-final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
+final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSource,
+    NSTableViewDelegate
+{
     private var panel: LauncherPanel!
     private var input: LauncherTextField!
     private var resultTable: NSTableView!
@@ -55,11 +57,11 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func receive(_ event: CoreIPCEvent) {
         switch event {
-        case let .results(query, results):
+        case .results(let query, let results):
             perform(interaction.receive(.results(query: query, results: results)))
-        case let .actionResult(intent, ok, error):
+        case .actionResult(let intent, let ok, let error):
             perform(interaction.receive(.actionResult(intent: intent, ok: ok, error: error)))
-        case let .failed(error):
+        case .failed(let error):
             perform([.logError("LaunchKick IPC failed: \(error)")])
         }
     }
@@ -72,7 +74,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     }
 
     private func registerKeyboardShortcuts() {
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+            [weak self] event in
             guard let self, panel.isVisible else {
                 return event
             }
@@ -100,7 +103,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             return event
         }
 
-        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) {
+            [weak self] event in
             guard event.isEscape, self?.panel.isVisible == true else { return }
 
             DispatchQueue.main.async {
@@ -130,9 +134,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
                 resultTable.reloadData()
             case .syncSelection:
                 syncSelectionToTable()
-            case let .sendToCore(intent):
+            case .sendToCore(let intent):
                 coreIPC.send(intent)
-            case let .logError(message):
+            case .logError(let message):
                 fputs("\(message)\n", stderr)
             }
         }
@@ -145,7 +149,21 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         }
 
         resultTable.selectRowIndexes(IndexSet(integer: selectedIndex), byExtendingSelection: false)
+
+        // if selectedIndex == 0
+        //     scrollRowToTop(selectedIndex)
+        // else
         resultTable.scrollRowToVisible(selectedIndex)
+    }
+
+    private func scrollRowToTop(_ row: Int) {
+        guard row >= 0, let scrollView = resultTable.enclosingScrollView else { return }
+
+        let rowRect = resultTable.rect(ofRow: row)
+        guard !rowRect.isEmpty else { return }
+
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: rowRect.minY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private func executeSelectedResult() {
@@ -173,7 +191,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     func tableView(_ tableView: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
         guard let result = interaction.result(at: row) else { return nil }
 
-        let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: tableView.bounds.width, height: tableView.rowHeight))
+        let cell = NSTableCellView(
+            frame: NSRect(x: 0, y: 0, width: tableView.bounds.width, height: tableView.rowHeight))
         cell.identifier = NSUserInterfaceItemIdentifier("LauncherResultCell")
 
         let icon = NSImageView(frame: NSRect(x: 12, y: 8, width: 32, height: 32))
@@ -181,7 +200,9 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         icon.imageScaling = .scaleProportionallyUpOrDown
 
         let title = NSTextField(labelWithString: result.title)
-        title.frame = NSRect(x: 56, y: result.subtitle == nil ? 11 : 18, width: max(0, tableView.bounds.width - 68), height: 22)
+        title.frame = NSRect(
+            x: 56, y: result.subtitle == nil ? 11 : 18, width: max(0, tableView.bounds.width - 68),
+            height: 22)
         title.font = NSFont.systemFont(ofSize: 17, weight: .medium)
         title.textColor = .labelColor
         title.lineBreakMode = .byTruncatingTail
@@ -193,7 +214,8 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
         if let subtitle = result.subtitle, !subtitle.isEmpty {
             let subtitleField = NSTextField(labelWithString: subtitle)
-            subtitleField.frame = NSRect(x: 56, y: 5, width: max(0, tableView.bounds.width - 68), height: 16)
+            subtitleField.frame = NSRect(
+                x: 56, y: 5, width: max(0, tableView.bounds.width - 68), height: 16)
             subtitleField.font = NSFont.systemFont(ofSize: 11)
             subtitleField.textColor = .secondaryLabelColor
             subtitleField.lineBreakMode = .byTruncatingMiddle

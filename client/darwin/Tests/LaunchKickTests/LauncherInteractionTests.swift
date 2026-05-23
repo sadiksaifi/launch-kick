@@ -52,6 +52,18 @@ final class LauncherInteractionTests: XCTestCase {
         XCTAssertEqual(interaction.stateSnapshot.selectedIndex, 1)
     }
 
+    func testIncomingResultsResetSelectionToFirstResult() {
+        var interaction = LauncherInteraction()
+        _ = interaction.receive(.results(query: "", results: results()))
+        _ = interaction.apply(.selectResult(index: 1))
+
+        let effects = interaction.receive(.results(query: "s", results: results()))
+
+        XCTAssertEqual(interaction.stateSnapshot.selectedIndex, 0)
+        XCTAssertEqual(interaction.stateSnapshot.selectedResult()?.id, "application:/Applications/Safari.app")
+        XCTAssertEqual(effects, [.reloadResults, .syncSelection])
+    }
+
     func testExecuteSelectedSendsExecuteIntentAndHidesLauncher() {
         var interaction = LauncherInteraction()
         _ = interaction.apply(.toggleVisibility)

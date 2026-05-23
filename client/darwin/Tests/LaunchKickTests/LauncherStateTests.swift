@@ -20,15 +20,15 @@ final class LauncherStateTests: XCTestCase {
         XCTAssertNil(state.selectedResult())
     }
 
-    func testReplacingResultsPreservesSelectionByResultID() {
+    func testReplacingResultsResetsSelectionToFirstResult() {
         var state = LauncherState()
         state.replaceResults(results())
         state.select(index: 1)
 
-        state.replaceResults([results()[1], results()[0]])
+        state.replaceResults(results())
 
         XCTAssertEqual(state.selectedIndex, 0)
-        XCTAssertEqual(state.selectedResult()?.id, "application:/Applications/Notes.app")
+        XCTAssertEqual(state.selectedResult()?.id, "application:/Applications/Safari.app")
     }
 
     func testMoveSelectionClampsToBounds() {

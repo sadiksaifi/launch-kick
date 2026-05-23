@@ -26,20 +26,10 @@ struct LauncherState: Equatable {
     }
 
     mutating func replaceResults(_ results: [LauncherResult]) {
-        let selectedID = selectedResult()?.id
         self.results = results
 
         guard !results.isEmpty else {
             selectedIndex = nil
-            return
-        }
-
-        if let selectedID, let preservedIndex = results.firstIndex(where: { $0.id == selectedID }) {
-            selectedIndex = preservedIndex
-            return
-        }
-
-        if let selectedIndex, results.indices.contains(selectedIndex) {
             return
         }
 
