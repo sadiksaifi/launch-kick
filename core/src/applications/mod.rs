@@ -5,11 +5,25 @@ use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
+    sync::{Arc, Mutex},
+    thread,
+    time::{Duration, Instant},
 };
+
+const DISCOVERY_REFRESH_AFTER: Duration = Duration::from_secs(30);
 
 pub struct Applications {
     roots: Vec<PathBuf>,
     launcher: Box<dyn ApplicationLauncher>,
+    discovery_cache: Arc<Mutex<DiscoveryCache>>,
+    refresh_after: Duration,
+}
+
+#[derive(Default)]
+struct DiscoveryCache {
+    applications: Option<Vec<Application>>,
+    last_refresh: Option<Instant>,
+    refresh_in_flight: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,11 +61,31 @@ impl Applications {
         Self {
             roots: default_application_roots(),
             launcher: Box::new(OpenApplicationLauncher),
+            discovery_cache: Arc::new(Mutex::new(DiscoveryCache::default())),
+            refresh_after: DISCOVERY_REFRESH_AFTER,
         }
     }
 
     pub fn list(&self) -> Vec<Application> {
-        discover_in_roots(&self.roots)
+        let (cached_applications, should_refresh) = {
+            let cache = self.discovery_cache.lock().unwrap();
+            let cached_applications = cache.applications.clone();
+            let should_refresh = cached_applications.is_some()
+                && !cache.refresh_in_flight
+                && cache
+                    .last_refresh
+                    .is_none_or(|last_refresh| last_refresh.elapsed() >= self.refresh_after);
+            (cached_applications, should_refresh)
+        };
+
+        if let Some(cached_applications) = cached_applications {
+            if should_refresh {
+                self.refresh_in_background();
+            }
+            return cached_applications;
+        }
+
+        self.discover_and_store()
     }
 
     pub fn launch(&self, path: &str) -> Result<(), LaunchError> {
@@ -85,7 +119,56 @@ impl Applications {
         Self {
             roots,
             launcher: Box::new(ClosureApplicationLauncher { launch: launcher }),
+            discovery_cache: Arc::new(Mutex::new(DiscoveryCache::default())),
+            refresh_after: DISCOVERY_REFRESH_AFTER,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_roots_launcher_and_refresh_for_test<F>(
+        roots: Vec<PathBuf>,
+        refresh_after: Duration,
+        launcher: F,
+    ) -> Self
+    where
+        F: Fn(&str) -> io::Result<ExitStatus> + Send + Sync + 'static,
+    {
+        Self {
+            roots,
+            launcher: Box::new(ClosureApplicationLauncher { launch: launcher }),
+            discovery_cache: Arc::new(Mutex::new(DiscoveryCache::default())),
+            refresh_after,
+        }
+    }
+
+    fn discover_and_store(&self) -> Vec<Application> {
+        let applications = discover_in_roots(&self.roots);
+        let mut cache = self.discovery_cache.lock().unwrap();
+        cache.applications = Some(applications.clone());
+        cache.last_refresh = Some(Instant::now());
+        cache.refresh_in_flight = false;
+        applications
+    }
+
+    fn refresh_in_background(&self) {
+        {
+            let mut cache = self.discovery_cache.lock().unwrap();
+            if cache.refresh_in_flight {
+                return;
+            }
+            cache.refresh_in_flight = true;
+        }
+
+        let roots = self.roots.clone();
+        let discovery_cache = Arc::clone(&self.discovery_cache);
+
+        thread::spawn(move || {
+            let applications = discover_in_roots(&roots);
+            let mut cache = discovery_cache.lock().unwrap();
+            cache.applications = Some(applications);
+            cache.last_refresh = Some(Instant::now());
+            cache.refresh_in_flight = false;
+        });
     }
 }
 
@@ -235,6 +318,7 @@ mod tests {
     use super::*;
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
+        thread,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -321,6 +405,51 @@ mod tests {
         assert!(applications.is_empty());
     }
 
+    #[test]
+    fn caches_discovered_applications_across_queries() {
+        let root = unique_temp_dir();
+        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
+        let applications = test_applications(vec![root.clone()]);
+
+        let first = applications.list();
+
+        fs::create_dir_all(root.join("Notes.app/Contents")).unwrap();
+        let second = applications.list();
+
+        assert_eq!(first, second);
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].name, "Safari");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stale_while_revalidate_refreshes_in_background_for_later_queries() {
+        let root = unique_temp_dir();
+        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
+        let applications = Applications::with_roots_launcher_and_refresh_for_test(
+            vec![root.clone()],
+            Duration::ZERO,
+            |_| Ok(success_status()),
+        );
+
+        let first = applications.list();
+        fs::create_dir_all(root.join("Notes.app/Contents")).unwrap();
+
+        let stale = applications.list();
+        assert_eq!(stale, first);
+
+        let refreshed = wait_for_applications(&applications, 2, Duration::from_secs(1));
+        let names = refreshed
+            .iter()
+            .map(|application| application.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["Notes", "Safari"]);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[cfg(unix)]
     #[test]
     fn launch_returns_ok_when_open_succeeds() {
@@ -372,6 +501,26 @@ mod tests {
 
     fn test_applications(roots: Vec<PathBuf>) -> Applications {
         Applications::with_roots_and_launcher_for_test(roots, |_| Ok(success_status()))
+    }
+
+    fn wait_for_applications(
+        applications: &Applications,
+        expected_count: usize,
+        timeout: Duration,
+    ) -> Vec<Application> {
+        let deadline = Instant::now() + timeout;
+
+        loop {
+            let snapshot = applications.list();
+            if snapshot.len() == expected_count {
+                return snapshot;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for refreshed applications"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[cfg(unix)]

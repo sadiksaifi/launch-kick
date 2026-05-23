@@ -40,6 +40,7 @@ struct LauncherInteraction {
         case .hide:
             return hide()
         case let .queryChanged(query):
+            state.setQuery(query)
             return [.sendToCore(.queryChanged(query))]
         case let .moveSelection(delta):
             state.moveSelection(by: delta)
@@ -56,6 +57,7 @@ struct LauncherInteraction {
     mutating func receive(_ event: LauncherCoreEvent) -> [LauncherEffect] {
         switch event {
         case let .results(query, results):
+            guard query == state.currentQuery else { return [] }
             guard state.isVisible || query.isEmpty else { return [] }
             state.replaceResults(results)
             return [.reloadResults, .syncSelection]
@@ -76,6 +78,7 @@ struct LauncherInteraction {
 
     private mutating func show() -> [LauncherEffect] {
         state.show()
+        state.setQuery("")
         return [
             .showPanel,
             .clearInput,
@@ -87,6 +90,7 @@ struct LauncherInteraction {
 
     private mutating func hide() -> [LauncherEffect] {
         state.hide()
+        state.setQuery("")
         return [.hidePanel, .clearInput, .sendToCore(.queryChanged(""))]
     }
 }

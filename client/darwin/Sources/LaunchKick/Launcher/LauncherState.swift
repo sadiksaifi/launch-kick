@@ -7,6 +7,7 @@ struct LauncherState: Equatable {
     private(set) var results: [LauncherResult] = []
     private(set) var selectedIndex: Int?
     private(set) var isVisible = false
+    private(set) var currentQuery = ""
 
     mutating func show() {
         isVisible = true
@@ -34,6 +35,10 @@ struct LauncherState: Equatable {
         }
 
         selectedIndex = 0
+    }
+
+    mutating func setQuery(_ query: String) {
+        currentQuery = query
     }
 
     mutating func moveSelection(by delta: Int) {

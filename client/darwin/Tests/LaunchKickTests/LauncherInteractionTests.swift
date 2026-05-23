@@ -65,6 +65,7 @@ final class LauncherInteractionTests: XCTestCase {
         var interaction = LauncherInteraction()
         _ = interaction.apply(.toggleVisibility)
         _ = interaction.receive(.results(query: "", results: results()))
+        _ = interaction.apply(.queryChanged("s"))
         _ = interaction.apply(.selectResult(index: 1))
 
         let effects = interaction.receive(.results(query: "s", results: results()))
@@ -72,6 +73,20 @@ final class LauncherInteractionTests: XCTestCase {
         XCTAssertEqual(interaction.stateSnapshot.selectedIndex, 0)
         XCTAssertEqual(interaction.stateSnapshot.selectedResult()?.id, "application:/Applications/Safari.app")
         XCTAssertEqual(effects, [.reloadResults, .syncSelection])
+    }
+
+    func testIncomingStaleResultsAreIgnoredWhenQueryHasChanged() {
+        var interaction = LauncherInteraction()
+        _ = interaction.apply(.toggleVisibility)
+        _ = interaction.apply(.queryChanged("hello"))
+        _ = interaction.apply(.queryChanged("hell"))
+        _ = interaction.apply(.queryChanged("hel"))
+
+        let effects = interaction.receive(.results(query: "hello", results: results()))
+
+        XCTAssertEqual(effects, [])
+        XCTAssertTrue(interaction.stateSnapshot.results.isEmpty)
+        XCTAssertNil(interaction.stateSnapshot.selectedIndex)
     }
 
     func testExecuteSelectedSendsExecuteIntentAndHidesLauncher() {
