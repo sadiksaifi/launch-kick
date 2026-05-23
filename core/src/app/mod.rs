@@ -16,7 +16,9 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let ui_stdout = ui.stdout.take().ok_or("missing UI stdout")?;
     let mut session = CoreSession::new();
 
-    transport::run_ndjson_loop(BufReader::new(ui_stdout), ui_stdin, &mut session)?;
+    transport::run_ndjson_loop(BufReader::new(ui_stdout), ui_stdin, |message| {
+        session.handle_client_message(message)
+    })?;
 
     let _ = ui.wait()?;
     Ok(())

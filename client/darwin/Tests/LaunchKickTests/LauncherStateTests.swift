@@ -2,27 +2,38 @@ import XCTest
 @testable import LaunchKick
 
 final class LauncherStateTests: XCTestCase {
-    func testReplacingNonEmptyAppsSelectsFirstApp() {
+    func testReplacingNonEmptyResultsSelectsFirstResult() {
         var state = LauncherState()
 
-        state.replaceApps(apps())
+        state.replaceResults(results())
 
         XCTAssertEqual(state.selectedIndex, 0)
-        XCTAssertEqual(state.selectedApplication(), apps()[0])
+        XCTAssertEqual(state.selectedResult(), results()[0])
     }
 
-    func testReplacingEmptyAppsClearsSelection() {
+    func testReplacingEmptyResultsClearsSelection() {
         var state = LauncherState()
-        state.replaceApps(apps())
-        state.replaceApps([])
+        state.replaceResults(results())
+        state.replaceResults([])
 
         XCTAssertNil(state.selectedIndex)
-        XCTAssertNil(state.selectedApplication())
+        XCTAssertNil(state.selectedResult())
+    }
+
+    func testReplacingResultsPreservesSelectionByResultID() {
+        var state = LauncherState()
+        state.replaceResults(results())
+        state.select(index: 1)
+
+        state.replaceResults([results()[1], results()[0]])
+
+        XCTAssertEqual(state.selectedIndex, 0)
+        XCTAssertEqual(state.selectedResult()?.id, "application:/Applications/Notes.app")
     }
 
     func testMoveSelectionClampsToBounds() {
         var state = LauncherState()
-        state.replaceApps(apps())
+        state.replaceResults(results())
 
         state.moveSelection(by: 10)
         XCTAssertEqual(state.selectedIndex, 1)
@@ -44,10 +55,57 @@ final class LauncherStateTests: XCTestCase {
         XCTAssertTrue(state.isVisible)
     }
 
-    private func apps() -> [LauncherApplication] {
+    func testSelectedExecuteIntentUsesSelectedResultFirstAction() {
+        var state = LauncherState()
+        state.replaceResults(results())
+        state.select(index: 1)
+
+        XCTAssertEqual(
+            state.selectedExecuteIntent(),
+            ExecuteIntent(resultID: "application:/Applications/Notes.app", actionID: "open")
+        )
+    }
+
+    func testSelectedExecuteIntentIsNilWithoutASelectedResult() {
+        let state = LauncherState()
+
+        XCTAssertNil(state.selectedExecuteIntent())
+    }
+
+    func testSelectedExecuteIntentIsNilWhenResultHasNoActions() {
+        var state = LauncherState()
+        state.replaceResults([
+            LauncherResult(
+                id: "command:empty",
+                title: "Empty",
+                subtitle: nil,
+                source: "test",
+                icon: nil,
+                actions: []
+            ),
+        ])
+
+        XCTAssertNil(state.selectedExecuteIntent())
+    }
+
+    private func results() -> [LauncherResult] {
         [
-            LauncherApplication(name: "Safari", path: "/Applications/Safari.app"),
-            LauncherApplication(name: "Notes", path: "/Applications/Notes.app"),
+            LauncherResult(
+                id: "application:/Applications/Safari.app",
+                title: "Safari",
+                subtitle: "/Applications/Safari.app",
+                source: "applications",
+                icon: IconDescriptor(kind: "file", value: "/Applications/Safari.app"),
+                actions: [LauncherAction(id: "open", title: "Open")]
+            ),
+            LauncherResult(
+                id: "application:/Applications/Notes.app",
+                title: "Notes",
+                subtitle: "/Applications/Notes.app",
+                source: "applications",
+                icon: IconDescriptor(kind: "file", value: "/Applications/Notes.app"),
+                actions: [LauncherAction(id: "open", title: "Open")]
+            ),
         ]
     }
 }

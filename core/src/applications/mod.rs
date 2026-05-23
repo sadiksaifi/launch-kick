@@ -1,4 +1,3 @@
-use crate::ipc::Application;
 use plist::Value;
 use std::{
     collections::HashSet,
@@ -11,6 +10,12 @@ use std::{
 pub struct Applications {
     roots: Vec<PathBuf>,
     launcher: Box<dyn ApplicationLauncher>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Application {
+    pub name: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,10 +169,10 @@ fn discover_in_directory(
         }
 
         if is_application_bundle(&path) {
-            if let Some(application) = application_from_bundle(&path) {
-                if seen_paths.insert(application.path.clone()) {
-                    applications.push(application);
-                }
+            if let Some(application) = application_from_bundle(&path)
+                && seen_paths.insert(application.path.clone())
+            {
+                applications.push(application);
             }
             continue;
         }

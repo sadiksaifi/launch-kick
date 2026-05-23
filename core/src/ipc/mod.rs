@@ -4,26 +4,51 @@ use std::{error::Error, fmt};
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
-    #[serde(rename = "app::list")]
-    AppList,
-    #[serde(rename = "app::launch")]
-    AppLaunch { path: String },
+    #[serde(rename = "launcher::query")]
+    Query { query: String },
+    #[serde(rename = "launcher::execute")]
+    Execute {
+        result_id: String,
+        action_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct Application {
-    pub name: String,
-    pub path: String,
+pub struct LauncherResult {
+    pub id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<IconDescriptor>,
+    pub actions: Vec<LauncherAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct LauncherAction {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct IconDescriptor {
+    pub kind: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
-    #[serde(rename = "app::list")]
-    AppList { apps: Vec<Application> },
-    #[serde(rename = "app::launch::result")]
-    AppLaunchResult {
-        path: String,
+    #[serde(rename = "launcher::results")]
+    Results {
+        query: String,
+        results: Vec<LauncherResult>,
+    },
+    #[serde(rename = "launcher::action::result")]
+    ActionResult {
+        result_id: String,
+        action_id: String,
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
@@ -67,73 +92,103 @@ pub fn encode_server_line(message: &ServerMessage) -> Result<String, IpcError> {
 mod tests {
     use super::*;
 
-    const CLIENT_APP_LIST: &str = include_str!("../../../ipc/fixtures/client-app-list.json");
-    const CLIENT_APP_LAUNCH: &str = include_str!("../../../ipc/fixtures/client-app-launch.json");
-    const SERVER_APP_LIST: &str = include_str!("../../../ipc/fixtures/server-app-list.json");
-    const SERVER_APP_LAUNCH_SUCCEEDED: &str =
-        include_str!("../../../ipc/fixtures/server-app-launch-succeeded.json");
-    const SERVER_APP_LAUNCH_FAILED: &str =
-        include_str!("../../../ipc/fixtures/server-app-launch-failed.json");
+    const CLIENT_QUERY_EMPTY: &str = include_str!("../../../ipc/fixtures/client-query-empty.json");
+    const CLIENT_QUERY_SAFARI: &str =
+        include_str!("../../../ipc/fixtures/client-query-safari.json");
+    const CLIENT_EXECUTE_RESULT: &str =
+        include_str!("../../../ipc/fixtures/client-execute-result.json");
+    const SERVER_RESULTS: &str = include_str!("../../../ipc/fixtures/server-results.json");
+    const SERVER_ACTION_SUCCEEDED: &str =
+        include_str!("../../../ipc/fixtures/server-action-succeeded.json");
+    const SERVER_ACTION_FAILED: &str =
+        include_str!("../../../ipc/fixtures/server-action-failed.json");
 
     #[test]
-    fn decodes_client_app_list_fixture() {
-        let message = decode_client_line(CLIENT_APP_LIST).unwrap();
-
-        assert_eq!(message, ClientMessage::AppList);
-    }
-
-    #[test]
-    fn decodes_client_app_launch_fixture() {
-        let message = decode_client_line(CLIENT_APP_LAUNCH).unwrap();
+    fn decodes_client_query_fixture() {
+        let message = decode_client_line(CLIENT_QUERY_EMPTY).unwrap();
 
         assert_eq!(
             message,
-            ClientMessage::AppLaunch {
-                path: "/Applications/Safari.app".to_string()
+            ClientMessage::Query {
+                query: String::new()
             }
         );
     }
 
     #[test]
-    fn encodes_server_app_list_fixture() {
-        let line = encode_server_line(&ServerMessage::AppList {
-            apps: vec![Application {
-                name: "Safari".to_string(),
-                path: "/Applications/Safari.app".to_string(),
-            }],
-        })
-        .unwrap();
+    fn decodes_client_query_text_fixture() {
+        let message = decode_client_line(CLIENT_QUERY_SAFARI).unwrap();
 
-        assert_json_line_eq(&line, SERVER_APP_LIST);
+        assert_eq!(
+            message,
+            ClientMessage::Query {
+                query: "saf".to_string()
+            }
+        );
     }
 
     #[test]
-    fn encodes_server_app_launch_success_fixture() {
-        let line = encode_server_line(&ServerMessage::AppLaunchResult {
-            path: "/Applications/Safari.app".to_string(),
+    fn decodes_client_execute_fixture() {
+        let message = decode_client_line(CLIENT_EXECUTE_RESULT).unwrap();
+
+        assert_eq!(
+            message,
+            ClientMessage::Execute {
+                result_id: "application:/Applications/Safari.app".to_string(),
+                action_id: "open".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn encodes_server_results_fixture() {
+        let line = encode_server_line(&ServerMessage::Results {
+            query: String::new(),
+            results: vec![safari_result()],
+        })
+        .unwrap();
+
+        assert_json_line_eq(&line, SERVER_RESULTS);
+    }
+
+    #[test]
+    fn encodes_server_action_success_fixture() {
+        let line = encode_server_line(&ServerMessage::ActionResult {
+            result_id: "application:/Applications/Safari.app".to_string(),
+            action_id: "open".to_string(),
             ok: true,
             error: None,
         })
         .unwrap();
 
-        assert_json_line_eq(&line, SERVER_APP_LAUNCH_SUCCEEDED);
+        assert_json_line_eq(&line, SERVER_ACTION_SUCCEEDED);
     }
 
     #[test]
-    fn encodes_server_app_launch_failure_fixture() {
-        let line = encode_server_line(&ServerMessage::AppLaunchResult {
-            path: "/Applications/Missing.app".to_string(),
+    fn encodes_server_action_failure_fixture() {
+        let line = encode_server_line(&ServerMessage::ActionResult {
+            result_id: "application:/Applications/Missing.app".to_string(),
+            action_id: "open".to_string(),
             ok: false,
             error: Some("launch failed".to_string()),
         })
         .unwrap();
 
-        assert_json_line_eq(&line, SERVER_APP_LAUNCH_FAILED);
+        assert_json_line_eq(&line, SERVER_ACTION_FAILED);
     }
 
     #[test]
     fn rejects_legacy_input_message() {
         let error = decode_client_line(r#"{"type":"input","text":"1 + 2"}"#).unwrap_err();
+
+        assert!(error.to_string().contains("invalid IPC message"));
+    }
+
+    #[test]
+    fn rejects_app_specific_client_message_type() {
+        let error =
+            decode_client_line(r#"{"type":"app::launch","path":"/Applications/Safari.app"}"#)
+                .unwrap_err();
 
         assert!(error.to_string().contains("invalid IPC message"));
     }
@@ -148,9 +203,28 @@ mod tests {
     #[test]
     fn rejects_malformed_json() {
         assert!(
-            decode_client_line(r#"{"type":"app::launch","path":"/Applications/Safari.app""#)
-                .is_err()
+            decode_client_line(
+                r#"{"type":"launcher::execute","result_id":"result","action_id":"open""#
+            )
+            .is_err()
         );
+    }
+
+    fn safari_result() -> LauncherResult {
+        LauncherResult {
+            id: "application:/Applications/Safari.app".to_string(),
+            title: "Safari".to_string(),
+            subtitle: Some("/Applications/Safari.app".to_string()),
+            source: "applications".to_string(),
+            icon: Some(IconDescriptor {
+                kind: "file".to_string(),
+                value: "/Applications/Safari.app".to_string(),
+            }),
+            actions: vec![LauncherAction {
+                id: "open".to_string(),
+                title: "Open".to_string(),
+            }],
+        }
     }
 
     fn assert_json_line_eq(actual_line: &str, expected_json: &str) {

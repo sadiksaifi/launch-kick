@@ -1,11 +1,11 @@
 import Foundation
 
 final class CoreIPC {
-    private var stdinBuffer = ""
+    private var lineBuffer = NDJSONLineBuffer()
     private let contract = IPCContract()
 
-    var onAppList: (([LauncherApplication]) -> Void)?
-    var onAppLaunchResult: ((String, Bool, String?) -> Void)?
+    var onResults: ((String, [LauncherResult]) -> Void)?
+    var onActionResult: ((String, String, Bool, String?) -> Void)?
 
     func startListening() {
         FileHandle.standardInput.readabilityHandler = { [weak self] handle in
@@ -18,20 +18,16 @@ final class CoreIPC {
         }
     }
 
-    func sendAppListRequest() {
-        sendToCore(AppListRequest())
+    func sendQuery(_ query: String) {
+        sendToCore(QueryRequest(query: query))
     }
 
-    func sendAppLaunch(path: String) {
-        sendToCore(AppLaunchRequest(path: path))
+    func sendExecute(resultID: String, actionID: String) {
+        sendToCore(ExecuteRequest(resultID: resultID, actionID: actionID))
     }
 
     private func handle(_ data: Data) {
-        stdinBuffer += String(data: data, encoding: .utf8) ?? ""
-
-        while let newline = stdinBuffer.firstIndex(of: "\n") {
-            let line = String(stdinBuffer[..<newline])
-            stdinBuffer.removeSubrange(...newline)
+        for line in lineBuffer.append(data) {
             handleLine(line)
         }
     }
@@ -40,10 +36,10 @@ final class CoreIPC {
         guard let message = try? contract.decodeServerLine(line) else { return }
 
         switch message {
-        case .appList(let apps):
-            onAppList?(apps)
-        case .appLaunchResult(let path, let ok, let error):
-            onAppLaunchResult?(path, ok, error)
+        case .results(let query, let results):
+            onResults?(query, results)
+        case .actionResult(let resultID, let actionID, let ok, let error):
+            onActionResult?(resultID, actionID, ok, error)
         }
     }
 

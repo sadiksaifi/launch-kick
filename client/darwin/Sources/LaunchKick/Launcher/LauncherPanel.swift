@@ -1,12 +1,14 @@
 import AppKit
 
 final class LauncherPanel: NSPanel {
+    var onCancel: (() -> Void)?
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
     override func keyDown(with event: NSEvent) {
         guard !event.isEscape else {
-            orderOut(nil)
+            onCancel?()
             return
         }
 
@@ -15,13 +17,15 @@ final class LauncherPanel: NSPanel {
 }
 
 final class LauncherTextField: NSTextField {
+    var onCancel: (() -> Void)?
+
     override func cancelOperation(_ sender: Any?) {
-        window?.orderOut(nil)
+        onCancel?()
     }
 
     override func keyDown(with event: NSEvent) {
         guard !event.isEscape else {
-            window?.orderOut(nil)
+            onCancel?()
             return
         }
 
