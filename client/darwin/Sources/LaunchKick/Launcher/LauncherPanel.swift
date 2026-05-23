@@ -2,6 +2,7 @@ import AppKit
 
 final class LauncherPanel: NSPanel {
     var onCancel: (() -> Void)?
+    var onFocusLost: (() -> Void)?
 
     override var canBecomeKey: Bool {
         true
@@ -18,6 +19,11 @@ final class LauncherPanel: NSPanel {
         }
 
         super.keyDown(with: event)
+    }
+
+    override func resignKey() {
+        super.resignKey()
+        onFocusLost?()
     }
 }
 

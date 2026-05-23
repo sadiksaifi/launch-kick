@@ -32,6 +32,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         panel.onCancel = { [weak self] in
             self?.apply(.hide)
         }
+        panel.onFocusLost = { [weak self] in
+            guard let self, interaction.stateSnapshot.isVisible else { return }
+            apply(.hide)
+        }
         input.onCancel = { [weak self] in
             self?.apply(.hide)
         }
