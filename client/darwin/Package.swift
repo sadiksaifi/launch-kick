@@ -11,6 +11,10 @@ let package = Package(
         .executable(name: "launch-kick", targets: ["LaunchKick"])
     ],
     targets: [
-        .executableTarget(name: "LaunchKick")
+        .executableTarget(name: "LaunchKick"),
+        .testTarget(
+            name: "LaunchKickTests",
+            dependencies: ["LaunchKick"]
+        )
     ]
 )

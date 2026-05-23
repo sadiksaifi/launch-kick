@@ -1,29 +1,11 @@
 import Foundation
 
-struct LauncherApplication: Decodable {
-    let name: String
-    let path: String
-}
-
-private struct AppListRequest: Encodable {
-    let type = "app::list"
-}
-
-private struct AppLaunchRequest: Encodable {
-    let type = "app::launch"
-    let path: String
-}
-
-private struct AppListResponse: Decodable {
-    let type: String
-    let apps: [LauncherApplication]
-}
-
 final class CoreIPC {
     private var stdinBuffer = ""
-    private let decoder = JSONDecoder()
-    private let encoder = JSONEncoder()
+    private let contract = IPCContract()
+
     var onAppList: (([LauncherApplication]) -> Void)?
+    var onAppLaunchResult: ((String, Bool, String?) -> Void)?
 
     func startListening() {
         FileHandle.standardInput.readabilityHandler = { [weak self] handle in
@@ -55,22 +37,23 @@ final class CoreIPC {
     }
 
     private func handleLine(_ line: String) {
-        guard
-            let data = line.data(using: .utf8),
-            let appList = try? decoder.decode(AppListResponse.self, from: data),
-            appList.type == "app::list"
-        else { return }
+        guard let message = try? contract.decodeServerLine(line) else { return }
 
-        onAppList?(appList.apps)
+        switch message {
+        case .appList(let apps):
+            onAppList?(apps)
+        case .appLaunchResult(let path, let ok, let error):
+            onAppLaunchResult?(path, ok, error)
+        }
     }
 
     private func sendToCore<Message: Encodable>(_ message: Message) {
         guard
-            let data = try? encoder.encode(message),
-            let line = String(data: data, encoding: .utf8)
+            let line = try? contract.encodeClientLine(message),
+            let data = line.data(using: .utf8)
         else { return }
 
-        print(line)
+        FileHandle.standardOutput.write(data)
         fflush(stdout)
     }
 }
