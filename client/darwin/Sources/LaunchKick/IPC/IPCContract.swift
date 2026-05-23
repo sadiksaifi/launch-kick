@@ -19,31 +19,19 @@ struct IconDescriptor: Codable, Equatable {
     let value: String
 }
 
-enum ClientMessageType {
+enum ClientMessage: Equatable {
+    case query(String)
+    case execute(resultID: String, actionID: String)
+}
+
+private enum ClientMessageType {
     static let query = "launcher::query"
     static let execute = "launcher::execute"
 }
 
-enum ServerMessageType {
+private enum ServerMessageType {
     static let results = "launcher::results"
     static let actionResult = "launcher::action::result"
-}
-
-struct QueryRequest: Encodable {
-    let type = ClientMessageType.query
-    let query: String
-}
-
-struct ExecuteRequest: Encodable {
-    let type = ClientMessageType.execute
-    let resultID: String
-    let actionID: String
-
-    enum CodingKeys: String, CodingKey {
-        case type
-        case resultID = "result_id"
-        case actionID = "action_id"
-    }
 }
 
 enum ServerMessage: Equatable {
@@ -55,8 +43,14 @@ struct IPCContract {
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
-    func encodeClientLine(_ message: some Encodable) throws -> String {
-        let data = try encoder.encode(message)
+    func encodeClientLine(_ message: ClientMessage) throws -> String {
+        let data: Data = switch message {
+        case let .query(query):
+            try encoder.encode(QueryRequest(query: query))
+        case let .execute(resultID, actionID):
+            try encoder.encode(ExecuteRequest(resultID: resultID, actionID: actionID))
+        }
+
         guard let json = String(data: data, encoding: .utf8) else {
             throw IPCContractError.invalidUTF8
         }
@@ -90,6 +84,23 @@ struct IPCContract {
 enum IPCContractError: Error, Equatable {
     case invalidUTF8
     case unknownServerMessage(String)
+}
+
+private struct QueryRequest: Encodable {
+    let type = ClientMessageType.query
+    let query: String
+}
+
+private struct ExecuteRequest: Encodable {
+    let type = ClientMessageType.execute
+    let resultID: String
+    let actionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case resultID = "result_id"
+        case actionID = "action_id"
+    }
 }
 
 private struct ServerEnvelope: Decodable {

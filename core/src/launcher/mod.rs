@@ -1,27 +1,36 @@
+mod action;
 mod application_source;
+mod command_source;
 mod session_state;
 
 use crate::ipc::{ClientMessage, ServerMessage};
-use application_source::ApplicationCommandSource;
-use session_state::{ActionBinding, LauncherSessionState, ResolveActionError};
+use command_source::CommandSources;
+use session_state::{LauncherSessionState, ResolveActionError};
 
 pub struct CoreSession {
-    application_source: ApplicationCommandSource,
+    command_sources: CommandSources,
     state: LauncherSessionState,
 }
 
 impl CoreSession {
     pub fn new() -> Self {
         Self {
-            application_source: ApplicationCommandSource::system(),
+            command_sources: CommandSources::system(),
             state: LauncherSessionState::default(),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn with_applications(applications: crate::applications::Applications) -> Self {
+        Self::with_command_sources(CommandSources::new(vec![Box::new(
+            application_source::ApplicationCommandSource::with_applications(applications),
+        )]))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_command_sources(command_sources: CommandSources) -> Self {
         Self {
-            application_source: ApplicationCommandSource::with_applications(applications),
+            command_sources,
             state: LauncherSessionState::default(),
         }
     }
@@ -37,7 +46,7 @@ impl CoreSession {
     }
 
     fn handle_query(&mut self, query: String) -> ServerMessage {
-        let records = self.application_source.results_for_query(&query);
+        let records = self.command_sources.results_for_query(&query);
         self.state.replace_results(query, records);
 
         ServerMessage::Results {
@@ -55,12 +64,10 @@ impl CoreSession {
         };
 
         match self.state.resolve_action(&result_id, &action_id) {
-            Ok(ActionBinding::OpenApplication { path }) => {
-                match self.application_source.launch_application(&path) {
-                    Ok(()) => response(true, None),
-                    Err(error) => response(false, Some(error.to_string())),
-                }
-            }
+            Ok(binding) => match binding.execute() {
+                Ok(()) => response(true, None),
+                Err(error) => response(false, Some(error.to_string())),
+            },
             Err(ResolveActionError::UnknownResult) => {
                 response(false, Some(format!("unknown result: {result_id}")))
             }

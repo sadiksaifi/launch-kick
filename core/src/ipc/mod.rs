@@ -102,6 +102,7 @@ mod tests {
         include_str!("../../../ipc/fixtures/server-action-succeeded.json");
     const SERVER_ACTION_FAILED: &str =
         include_str!("../../../ipc/fixtures/server-action-failed.json");
+    const MANIFEST: &str = include_str!("../../../ipc/fixtures/manifest.json");
 
     #[test]
     fn decodes_client_query_fixture() {
@@ -210,6 +211,59 @@ mod tests {
         );
     }
 
+    #[test]
+    fn manifest_lists_existing_fixture_files() {
+        for fixture_case in manifest().cases {
+            let path = fixtures_dir().join(&fixture_case.file);
+            assert!(path.exists(), "missing fixture file {}", fixture_case.file);
+        }
+    }
+
+    #[test]
+    fn every_json_fixture_file_is_listed_in_manifest() {
+        let listed = manifest()
+            .cases
+            .into_iter()
+            .map(|fixture_case| fixture_case.file)
+            .collect::<std::collections::HashSet<_>>();
+
+        for entry in std::fs::read_dir(fixtures_dir()).unwrap() {
+            let path = entry.unwrap().path();
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if file_name == "manifest.json" || !file_name.ends_with(".json") {
+                continue;
+            }
+
+            assert!(
+                listed.contains(file_name),
+                "unlisted fixture file {file_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn manifest_case_metadata_matches_fixture_types() {
+        for fixture_case in manifest().cases {
+            let json = std::fs::read_to_string(fixtures_dir().join(&fixture_case.file)).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                value["type"].as_str(),
+                Some(fixture_case.message_type.as_str())
+            );
+            assert!(
+                matches!(
+                    fixture_case.direction.as_str(),
+                    "client_to_core" | "core_to_client"
+                ),
+                "unknown fixture direction {}",
+                fixture_case.direction
+            );
+            assert!(!fixture_case.name.is_empty());
+        }
+    }
+
     fn safari_result() -> LauncherResult {
         LauncherResult {
             id: "application:/Applications/Safari.app".to_string(),
@@ -232,5 +286,27 @@ mod tests {
         let actual: serde_json::Value = serde_json::from_str(actual_line.trim_end()).unwrap();
         let expected: serde_json::Value = serde_json::from_str(expected_json).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    fn manifest() -> FixtureManifest {
+        serde_json::from_str(MANIFEST).unwrap()
+    }
+
+    fn fixtures_dir() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ipc/fixtures")
+    }
+
+    #[derive(serde::Deserialize)]
+    struct FixtureManifest {
+        cases: Vec<FixtureCase>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct FixtureCase {
+        name: String,
+        direction: String,
+        #[serde(rename = "type")]
+        message_type: String,
+        file: String,
     }
 }
