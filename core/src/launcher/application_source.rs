@@ -1,15 +1,20 @@
-use super::session_state::{ActionBinding, LauncherResultRecord};
+use super::{
+    action::{ActionBinding, ActionExecutionError, ActionExecutor},
+    command_source::CommandSource,
+    session_state::LauncherResultRecord,
+};
 use crate::{
-    applications::{Application, Applications, LaunchError},
+    applications::{Application, Applications},
     ipc::{IconDescriptor, LauncherAction, LauncherResult},
 };
+use std::sync::Arc;
 
 const APPLICATION_SOURCE: &str = "applications";
 const OPEN_ACTION: &str = "open";
 const APPLICATION_RESULT_PREFIX: &str = "application:";
 
 pub(crate) struct ApplicationCommandSource {
-    applications: Applications,
+    applications: Arc<Applications>,
 }
 
 impl ApplicationCommandSource {
@@ -18,17 +23,21 @@ impl ApplicationCommandSource {
     }
 
     pub(crate) fn with_applications(applications: Applications) -> Self {
-        Self { applications }
+        Self {
+            applications: Arc::new(applications),
+        }
     }
+}
 
-    pub(crate) fn results_for_query(&self, query: &str) -> Vec<LauncherResultRecord> {
+impl CommandSource for ApplicationCommandSource {
+    fn results_for_query(&self, query: &str) -> Vec<LauncherResultRecord> {
         let normalized_query = query.trim().to_lowercase();
         let mut records = self
             .applications
             .list()
             .into_iter()
             .filter(|application| application_matches(application, &normalized_query))
-            .map(application_record)
+            .map(|application| application_record(application, Arc::clone(&self.applications)))
             .collect::<Vec<_>>();
 
         records.sort_by(|left, right| {
@@ -47,10 +56,6 @@ impl ApplicationCommandSource {
         });
 
         records
-    }
-
-    pub(crate) fn launch_application(&self, path: &str) -> Result<(), LaunchError> {
-        self.applications.launch(path)
     }
 }
 
@@ -77,7 +82,10 @@ fn result_rank(title: &str, normalized_query: &str) -> usize {
     }
 }
 
-fn application_record(application: Application) -> LauncherResultRecord {
+fn application_record(
+    application: Application,
+    applications: Arc<Applications>,
+) -> LauncherResultRecord {
     let path = application.path;
     let result = LauncherResult {
         id: format!("{APPLICATION_RESULT_PREFIX}{path}"),
@@ -88,14 +96,29 @@ fn application_record(application: Application) -> LauncherResultRecord {
             kind: "file".to_string(),
             value: path.clone(),
         }),
-        actions: vec![LauncherAction {
-            id: OPEN_ACTION.to_string(),
-            title: "Open".to_string(),
-        }],
+        actions: Vec::new(),
     };
 
-    LauncherResultRecord::new(result)
-        .with_action(OPEN_ACTION, ActionBinding::OpenApplication { path })
+    LauncherResultRecord::new(result).with_action(
+        LauncherAction {
+            id: OPEN_ACTION.to_string(),
+            title: "Open".to_string(),
+        },
+        ActionBinding::new(OpenApplicationAction { applications, path }),
+    )
+}
+
+struct OpenApplicationAction {
+    applications: Arc<Applications>,
+    path: String,
+}
+
+impl ActionExecutor for OpenApplicationAction {
+    fn execute(&self) -> Result<(), ActionExecutionError> {
+        self.applications
+            .launch(&self.path)
+            .map_err(|error| ActionExecutionError::new(error.to_string()))
+    }
 }
 
 #[cfg(test)]
@@ -137,6 +160,7 @@ mod tests {
         );
         assert_eq!(result.actions.len(), 1);
         assert_eq!(result.actions[0].id, "open");
+        assert_eq!(result.actions[0].title, "Open");
 
         let _ = fs::remove_dir_all(root);
     }
@@ -159,22 +183,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(titles, vec!["Safari", "Safe Exam Browser"]);
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn launches_application_by_bound_path() {
-        let root = unique_temp_dir();
-        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
-        let safari_path = canonical_string(&root.join("Safari.app"));
-        let source = ApplicationCommandSource::with_applications(test_applications(
-            vec![root.clone()],
-            true,
-        ));
-
-        source.launch_application(&safari_path).unwrap();
 
         let _ = fs::remove_dir_all(root);
     }

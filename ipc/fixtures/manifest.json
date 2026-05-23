@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "client-query-empty",
+      "direction": "client_to_core",
+      "type": "launcher::query",
+      "file": "client-query-empty.json"
+    },
+    {
+      "name": "client-query-safari",
+      "direction": "client_to_core",
+      "type": "launcher::query",
+      "file": "client-query-safari.json"
+    },
+    {
+      "name": "client-execute-result",
+      "direction": "client_to_core",
+      "type": "launcher::execute",
+      "file": "client-execute-result.json"
+    },
+    {
+      "name": "server-results",
+      "direction": "core_to_client",
+      "type": "launcher::results",
+      "file": "server-results.json"
+    },
+    {
+      "name": "server-action-succeeded",
+      "direction": "core_to_client",
+      "type": "launcher::action::result",
+      "file": "server-action-succeeded.json"
+    },
+    {
+      "name": "server-action-failed",
+      "direction": "core_to_client",
+      "type": "launcher::action::result",
+      "file": "server-action-failed.json"
+    }
+  ]
+}

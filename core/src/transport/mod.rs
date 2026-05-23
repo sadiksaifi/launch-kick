@@ -1,5 +1,14 @@
 use crate::ipc::{self, ClientMessage, ServerMessage};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
+
+pub fn run_ndjson_transport<R, W, H>(reader: R, writer: W, handle_message: H) -> io::Result<()>
+where
+    R: Read,
+    W: Write,
+    H: FnMut(ClientMessage) -> Vec<ServerMessage>,
+{
+    run_ndjson_loop(BufReader::new(reader), writer, handle_message)
+}
 
 pub fn run_ndjson_loop<R, W, H>(reader: R, mut writer: W, mut handle_message: H) -> io::Result<()>
 where
