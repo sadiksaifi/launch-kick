@@ -13,10 +13,18 @@ pub enum ClientMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Application {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
     #[serde(rename = "result")]
     Result { value: String },
+    #[serde(rename = "app::list")]
+    AppList { apps: Vec<Application> },
 }
 
 #[derive(Debug)]
@@ -92,14 +100,23 @@ mod tests {
     }
 
     #[test]
-    fn encodes_result_message_as_json_line() {
-        let line = encode_server_line(&ServerMessage::Result {
-            value: "3".to_string(),
+    fn encodes_app_list_message_as_json_line() {
+        let line = encode_server_line(&ServerMessage::AppList {
+            apps: vec![Application {
+                name: "Safari".to_string(),
+                path: "/Applications/Safari.app".to_string(),
+            }],
         })
         .unwrap();
 
         assert!(line.ends_with('\n'));
         let value: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
-        assert_eq!(value, json!({ "type": "result", "value": "3" }));
+        assert_eq!(
+            value,
+            json!({
+                "type": "app::list",
+                "apps": [{ "name": "Safari", "path": "/Applications/Safari.app" }]
+            })
+        );
     }
 }
