@@ -31,4 +31,7 @@ final class LauncherTextField: NSTextField {
 
 extension NSEvent {
     var isEscape: Bool { keyCode == 53 }
+    var isReturnOrEnter: Bool { keyCode == 36 || keyCode == 76 }
+    var isArrowDown: Bool { keyCode == 125 }
+    var isArrowUp: Bool { keyCode == 126 }
 }

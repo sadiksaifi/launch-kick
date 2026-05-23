@@ -1,20 +1,29 @@
 import Foundation
 
-private struct ClientInputMessage: Encodable {
-    let type = "input"
-    let text: String
+struct LauncherApplication: Decodable {
+    let name: String
+    let path: String
 }
 
-private struct ServerResultMessage: Decodable {
+private struct AppListRequest: Encodable {
+    let type = "app::list"
+}
+
+private struct AppLaunchRequest: Encodable {
+    let type = "app::launch"
+    let path: String
+}
+
+private struct AppListResponse: Decodable {
     let type: String
-    let value: String
+    let apps: [LauncherApplication]
 }
 
 final class CoreIPC {
     private var stdinBuffer = ""
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
-    var onResult: ((String) -> Void)?
+    var onAppList: (([LauncherApplication]) -> Void)?
 
     func startListening() {
         FileHandle.standardInput.readabilityHandler = { [weak self] handle in
@@ -27,8 +36,12 @@ final class CoreIPC {
         }
     }
 
-    func sendInput(_ text: String) {
-        sendToCore(ClientInputMessage(text: text))
+    func sendAppListRequest() {
+        sendToCore(AppListRequest())
+    }
+
+    func sendAppLaunch(path: String) {
+        sendToCore(AppLaunchRequest(path: path))
     }
 
     private func handle(_ data: Data) {
@@ -44,11 +57,11 @@ final class CoreIPC {
     private func handleLine(_ line: String) {
         guard
             let data = line.data(using: .utf8),
-            let result = try? decoder.decode(ServerResultMessage.self, from: data),
-            result.type == "result"
+            let appList = try? decoder.decode(AppListResponse.self, from: data),
+            appList.type == "app::list"
         else { return }
 
-        onResult?(result.value)
+        onAppList?(appList.apps)
     }
 
     private func sendToCore<Message: Encodable>(_ message: Message) {
