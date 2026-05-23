@@ -3,7 +3,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
     private var panel: LauncherPanel!
     private var input: LauncherTextField!
-    private var appTable: NSTableView!
+    private var resultTable: NSTableView!
     private var state = LauncherState()
     private var hotKey: HotKey!
     private var localKeyMonitor: Any?
@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         NSApp.setActivationPolicy(.accessory)
         createPanel()
         listenToCore()
-        coreIPC.sendAppListRequest()
+        coreIPC.sendQuery("")
         registerHotKey()
         registerKeyboardShortcuts()
     }
@@ -23,28 +23,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         let view = LauncherView.create()
         panel = view.panel
         input = view.input
-        appTable = view.appTable
+        resultTable = view.resultTable
         input.delegate = self
-        appTable.dataSource = self
-        appTable.delegate = self
-        appTable.target = self
-        appTable.action = #selector(appTableClicked)
+        resultTable.dataSource = self
+        resultTable.delegate = self
+        resultTable.target = self
+        resultTable.action = #selector(resultTableClicked)
     }
 
     private func listenToCore() {
-        coreIPC.onAppList = { [weak self] apps in
-            self?.showApps(apps)
+        coreIPC.onResults = { [weak self] _, results in
+            self?.showResults(results)
         }
-        coreIPC.onAppLaunchResult = { path, ok, error in
+        coreIPC.onActionResult = { resultID, actionID, ok, error in
             guard !ok else { return }
-            fputs("LaunchKick launch failed for \(path): \(error ?? "unknown error")\n", stderr)
+            fputs("LaunchKick action failed for \(resultID)#\(actionID): \(error ?? "unknown error")\n", stderr)
         }
         coreIPC.startListening()
     }
 
-    private func showApps(_ apps: [LauncherApplication]) {
-        state.replaceApps(apps)
-        appTable.reloadData()
+    private func showResults(_ results: [LauncherResult]) {
+        state.replaceResults(results)
+        resultTable.reloadData()
         syncSelectionToTable()
     }
 
@@ -67,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             }
 
             if event.isReturnOrEnter {
-                launchSelectedApp()
+                executeSelectedResult()
                 return nil
             }
 
@@ -110,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         input.stringValue = ""
         syncSelectionToTable()
         panel.makeFirstResponder(input)
-        coreIPC.sendAppListRequest()
+        coreIPC.sendQuery("")
     }
 
     private func hideLauncher() {
@@ -125,56 +125,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
     private func syncSelectionToTable() {
         guard let selectedIndex = state.selectedIndex else {
-            appTable.deselectAll(nil)
+            resultTable.deselectAll(nil)
             return
         }
 
-        appTable.selectRowIndexes(IndexSet(integer: selectedIndex), byExtendingSelection: false)
-        appTable.scrollRowToVisible(selectedIndex)
+        resultTable.selectRowIndexes(IndexSet(integer: selectedIndex), byExtendingSelection: false)
+        resultTable.scrollRowToVisible(selectedIndex)
     }
 
-    private func launchSelectedApp() {
-        if appTable.selectedRow != -1 {
-            state.select(index: appTable.selectedRow)
+    private func executeSelectedResult() {
+        if resultTable.selectedRow != -1 {
+            state.select(index: resultTable.selectedRow)
         }
 
-        guard let app = state.selectedApplication() else { return }
+        guard
+            let result = state.selectedResult(),
+            let action = result.actions.first
+        else { return }
 
-        coreIPC.sendAppLaunch(path: app.path)
+        coreIPC.sendExecute(resultID: result.id, actionID: action.id)
         hideLauncher()
     }
 
-    @objc private func appTableClicked() {
-        if appTable.clickedRow != -1 {
-            state.select(index: appTable.clickedRow)
+    @objc private func resultTableClicked() {
+        if resultTable.clickedRow != -1 {
+            state.select(index: resultTable.clickedRow)
         }
-        launchSelectedApp()
+        executeSelectedResult()
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        coreIPC.sendQuery(input.stringValue)
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        state.apps.count
+        state.results.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard let app = state.app(at: row) else { return nil }
+        guard let result = state.result(at: row) else { return nil }
 
         let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: tableView.bounds.width, height: tableView.rowHeight))
-        cell.identifier = NSUserInterfaceItemIdentifier("ApplicationCell")
+        cell.identifier = NSUserInterfaceItemIdentifier("LauncherResultCell")
 
         let icon = NSImageView(frame: NSRect(x: 12, y: 8, width: 32, height: 32))
-        icon.image = NSWorkspace.shared.icon(forFile: app.path)
+        icon.image = image(for: result)
         icon.imageScaling = .scaleProportionallyUpOrDown
 
-        let name = NSTextField(labelWithString: app.name)
-        name.frame = NSRect(x: 56, y: 11, width: max(0, tableView.bounds.width - 68), height: 26)
-        name.font = NSFont.systemFont(ofSize: 17, weight: .medium)
-        name.textColor = .labelColor
-        name.lineBreakMode = .byTruncatingTail
+        let title = NSTextField(labelWithString: result.title)
+        title.frame = NSRect(x: 56, y: result.subtitle == nil ? 11 : 18, width: max(0, tableView.bounds.width - 68), height: 22)
+        title.font = NSFont.systemFont(ofSize: 17, weight: .medium)
+        title.textColor = .labelColor
+        title.lineBreakMode = .byTruncatingTail
 
         cell.addSubview(icon)
-        cell.addSubview(name)
+        cell.addSubview(title)
         cell.imageView = icon
-        cell.textField = name
+        cell.textField = title
+
+        if let subtitle = result.subtitle, !subtitle.isEmpty {
+            let subtitleField = NSTextField(labelWithString: subtitle)
+            subtitleField.frame = NSRect(x: 56, y: 5, width: max(0, tableView.bounds.width - 68), height: 16)
+            subtitleField.font = NSFont.systemFont(ofSize: 11)
+            subtitleField.textColor = .secondaryLabelColor
+            subtitleField.lineBreakMode = .byTruncatingMiddle
+            cell.addSubview(subtitleField)
+        }
+
         return cell
+    }
+
+    private func image(for result: LauncherResult) -> NSImage? {
+        guard let icon = result.icon else {
+            return NSImage(systemSymbolName: "command", accessibilityDescription: nil)
+        }
+
+        switch icon.kind {
+        case "file":
+            return NSWorkspace.shared.icon(forFile: icon.value)
+        default:
+            return NSImage(systemSymbolName: "command", accessibilityDescription: nil)
+        }
     }
 }

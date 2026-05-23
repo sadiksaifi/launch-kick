@@ -1,4 +1,3 @@
-use crate::ipc::Application;
 use plist::Value;
 use std::{
     collections::HashSet,
@@ -11,6 +10,12 @@ use std::{
 pub struct Applications {
     roots: Vec<PathBuf>,
     launcher: Box<dyn ApplicationLauncher>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Application {
+    pub name: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

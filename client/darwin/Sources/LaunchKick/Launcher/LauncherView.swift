@@ -3,7 +3,7 @@ import AppKit
 struct LauncherView {
     let panel: LauncherPanel
     let input: LauncherTextField
-    let appTable: NSTableView
+    let resultTable: NSTableView
 
     static func create() -> LauncherView {
         let panel = LauncherPanel(
@@ -31,35 +31,35 @@ struct LauncherView {
 
         let input = LauncherTextField(frame: NSRect(x: 24, y: 456, width: 592, height: 40))
         input.font = NSFont.systemFont(ofSize: 24)
-        input.placeholderString = "Search apps..."
+        input.placeholderString = "Search commands..."
         input.isBordered = false
         input.drawsBackground = false
         input.textColor = .labelColor
         input.focusRingType = .none
 
-        let appTable = NSTableView(frame: NSRect(x: 0, y: 0, width: 592, height: 408))
-        appTable.headerView = nil
-        appTable.rowHeight = 48
-        appTable.backgroundColor = .clear
-        appTable.selectionHighlightStyle = .regular
-        appTable.usesAlternatingRowBackgroundColors = false
-        appTable.allowsMultipleSelection = false
+        let resultTable = NSTableView(frame: NSRect(x: 0, y: 0, width: 592, height: 408))
+        resultTable.headerView = nil
+        resultTable.rowHeight = 48
+        resultTable.backgroundColor = .clear
+        resultTable.selectionHighlightStyle = .regular
+        resultTable.usesAlternatingRowBackgroundColors = false
+        resultTable.allowsMultipleSelection = false
 
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ApplicationColumn"))
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("LauncherResultColumn"))
         column.width = 592
-        appTable.addTableColumn(column)
+        resultTable.addTableColumn(column)
 
         let scrollView = NSScrollView(frame: NSRect(x: 24, y: 24, width: 592, height: 408))
         scrollView.autoresizingMask = [.width, .height]
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
-        scrollView.documentView = appTable
+        scrollView.documentView = resultTable
 
         background.addSubview(input)
         background.addSubview(scrollView)
         panel.contentView = background
         panel.center()
 
-        return LauncherView(panel: panel, input: input, appTable: appTable)
+        return LauncherView(panel: panel, input: input, resultTable: resultTable)
     }
 }

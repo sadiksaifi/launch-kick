@@ -4,49 +4,77 @@ import XCTest
 final class IPCContractTests: XCTestCase {
     private let contract = IPCContract()
 
-    func testEncodesAppListRequest() throws {
-        let line = try contract.encodeClientLine(AppListRequest())
+    func testEncodesQueryRequest() throws {
+        let line = try contract.encodeClientLine(QueryRequest(query: ""))
 
-        try XCTAssertJSONLine(line, equalsFixture: "client-app-list.json")
+        try XCTAssertJSONLine(line, equalsFixture: "client-query-empty.json")
     }
 
-    func testEncodesAppLaunchRequest() throws {
-        let line = try contract.encodeClientLine(AppLaunchRequest(path: "/Applications/Safari.app"))
+    func testEncodesTextQueryRequest() throws {
+        let line = try contract.encodeClientLine(QueryRequest(query: "saf"))
 
-        try XCTAssertJSONLine(line, equalsFixture: "client-app-launch.json")
+        try XCTAssertJSONLine(line, equalsFixture: "client-query-safari.json")
     }
 
-    func testDecodesAppListResponse() throws {
-        let message = try contract.decodeServerLine(fixture("server-app-list.json"))
+    func testEncodesExecuteRequest() throws {
+        let line = try contract.encodeClientLine(ExecuteRequest(
+            resultID: "application:/Applications/Safari.app",
+            actionID: "open"
+        ))
+
+        try XCTAssertJSONLine(line, equalsFixture: "client-execute-result.json")
+    }
+
+    func testDecodesResultsResponse() throws {
+        let message = try contract.decodeServerLine(fixture("server-results.json"))
 
         XCTAssertEqual(
             message,
-            .appList([
-                LauncherApplication(name: "Safari", path: "/Applications/Safari.app")
-            ])
+            .results(query: "", results: [safariResult()])
         )
     }
 
-    func testDecodesLaunchSuccessResponse() throws {
-        let message = try contract.decodeServerLine(fixture("server-app-launch-succeeded.json"))
+    func testDecodesActionSuccessResponse() throws {
+        let message = try contract.decodeServerLine(fixture("server-action-succeeded.json"))
 
         XCTAssertEqual(
             message,
-            .appLaunchResult(path: "/Applications/Safari.app", ok: true, error: nil)
+            .actionResult(
+                resultID: "application:/Applications/Safari.app",
+                actionID: "open",
+                ok: true,
+                error: nil
+            )
         )
     }
 
-    func testDecodesLaunchFailureResponse() throws {
-        let message = try contract.decodeServerLine(fixture("server-app-launch-failed.json"))
+    func testDecodesActionFailureResponse() throws {
+        let message = try contract.decodeServerLine(fixture("server-action-failed.json"))
 
         XCTAssertEqual(
             message,
-            .appLaunchResult(path: "/Applications/Missing.app", ok: false, error: "launch failed")
+            .actionResult(
+                resultID: "application:/Applications/Missing.app",
+                actionID: "open",
+                ok: false,
+                error: "launch failed"
+            )
         )
     }
 
     func testRejectsUnknownServerMessage() throws {
         XCTAssertThrowsError(try contract.decodeServerLine("{\"type\":\"unknown\"}"))
+    }
+
+    private func safariResult() -> LauncherResult {
+        LauncherResult(
+            id: "application:/Applications/Safari.app",
+            title: "Safari",
+            subtitle: "/Applications/Safari.app",
+            source: "applications",
+            icon: IconDescriptor(kind: "file", value: "/Applications/Safari.app"),
+            actions: [LauncherAction(id: "open", title: "Open")]
+        )
     }
 
     private func XCTAssertJSONLine(_ line: String, equalsFixture fixtureName: String, file: StaticString = #filePath, line sourceLine: UInt = #line) throws {

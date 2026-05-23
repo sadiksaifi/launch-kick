@@ -1,10 +1,15 @@
-use crate::{ipc, launcher::CoreSession};
+use crate::ipc::{self, ClientMessage, ServerMessage};
 use std::io::{self, BufRead, Write};
 
-pub fn run_ndjson_loop<R, W>(reader: R, mut writer: W, session: &mut CoreSession) -> io::Result<()>
+pub trait MessageHandler {
+    fn handle_client_message(&mut self, message: ClientMessage) -> Vec<ServerMessage>;
+}
+
+pub fn run_ndjson_loop<R, W, H>(reader: R, mut writer: W, handler: &mut H) -> io::Result<()>
 where
     R: BufRead,
     W: Write,
+    H: MessageHandler,
 {
     for line in reader.lines() {
         let line = line?;
@@ -12,7 +17,7 @@ where
             continue;
         };
 
-        for response in session.handle_client_message(message) {
+        for response in handler.handle_client_message(message) {
             let line = ipc::encode_server_line(&response).map_err(io::Error::other)?;
             writer.write_all(line.as_bytes())?;
             writer.flush()?;
@@ -25,69 +30,76 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::applications::Applications;
+    use crate::ipc::{LauncherAction, LauncherResult};
     use serde_json::Value;
-    use std::{
-        fs,
-        path::PathBuf,
-        time::{SystemTime, UNIX_EPOCH},
-    };
-
-    #[cfg(unix)]
-    use std::{io::ErrorKind, os::unix::process::ExitStatusExt, process::ExitStatus};
+    use std::io::ErrorKind;
 
     #[test]
     fn eof_exits_cleanly() {
-        let mut session = test_session(Vec::new(), true);
+        let mut handler = RecordingHandler::default();
         let mut output = Vec::new();
 
-        run_ndjson_loop(io::Cursor::new(Vec::<u8>::new()), &mut output, &mut session).unwrap();
+        run_ndjson_loop(io::Cursor::new(Vec::<u8>::new()), &mut output, &mut handler).unwrap();
 
         assert!(output.is_empty());
+        assert!(handler.messages.is_empty());
     }
 
     #[test]
     fn malformed_lines_are_ignored_and_loop_continues() {
-        let root = unique_temp_dir();
-        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
-        let mut session = test_session(vec![root.clone()], true);
-        let input = b"not json\n{\"type\":\"app::list\"}\n";
+        let mut handler = RecordingHandler::with_response(ServerMessage::Results {
+            query: "saf".to_string(),
+            results: vec![test_result()],
+        });
+        let input = b"not json\n{\"type\":\"launcher::query\",\"query\":\"saf\"}\n";
         let mut output = Vec::new();
 
-        run_ndjson_loop(io::Cursor::new(input), &mut output, &mut session).unwrap();
+        run_ndjson_loop(io::Cursor::new(input), &mut output, &mut handler).unwrap();
 
         let lines = output_lines(&output);
+        assert_eq!(handler.messages.len(), 1);
         assert_eq!(lines.len(), 1);
-        assert_eq!(json_type(lines[0]), "app::list");
-
-        let _ = fs::remove_dir_all(root);
+        assert_eq!(json_type(lines[0]), "launcher::results");
     }
 
     #[test]
     fn multiple_messages_produce_multiple_server_lines() {
-        let root = unique_temp_dir();
-        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
-        let mut session = test_session(vec![root.clone()], true);
-        let input = b"{\"type\":\"app::list\"}\n{\"type\":\"app::launch\",\"path\":\"/Applications/Safari.app\"}\n";
+        let mut handler = RecordingHandler::with_responses(vec![
+            ServerMessage::Results {
+                query: String::new(),
+                results: vec![test_result()],
+            },
+            ServerMessage::ActionResult {
+                result_id: "application:/Applications/Safari.app".to_string(),
+                action_id: "open".to_string(),
+                ok: true,
+                error: None,
+            },
+        ]);
+        let input = b"{\"type\":\"launcher::query\",\"query\":\"\"}\n{\"type\":\"launcher::execute\",\"result_id\":\"application:/Applications/Safari.app\",\"action_id\":\"open\"}\n";
         let mut output = Vec::new();
 
-        run_ndjson_loop(io::Cursor::new(input), &mut output, &mut session).unwrap();
+        run_ndjson_loop(io::Cursor::new(input), &mut output, &mut handler).unwrap();
 
         let lines = output_lines(&output);
+        assert_eq!(handler.messages.len(), 2);
         assert_eq!(lines.len(), 2);
-        assert_eq!(json_type(lines[0]), "app::list");
-        assert_eq!(json_type(lines[1]), "app::launch::result");
-
-        let _ = fs::remove_dir_all(root);
+        assert_eq!(json_type(lines[0]), "launcher::results");
+        assert_eq!(json_type(lines[1]), "launcher::action::result");
     }
 
     #[test]
     fn flushes_after_each_server_message() {
-        let mut session = test_session(Vec::new(), true);
-        let input = b"{\"type\":\"app::launch\",\"path\":\"/Applications/Safari.app\"}\n";
+        let mut handler = RecordingHandler::with_response(ServerMessage::ActionResult {
+            result_id: "application:/Applications/Safari.app".to_string(),
+            action_id: "open".to_string(),
+            ok: true,
+            error: None,
+        });
+        let input = b"{\"type\":\"launcher::execute\",\"result_id\":\"application:/Applications/Safari.app\",\"action_id\":\"open\"}\n";
         let mut writer = RecordingWriter::default();
 
-        run_ndjson_loop(io::Cursor::new(input), &mut writer, &mut session).unwrap();
+        run_ndjson_loop(io::Cursor::new(input), &mut writer, &mut handler).unwrap();
 
         assert_eq!(writer.flushes, 1);
         assert_eq!(writer.writes.len(), 1);
@@ -95,28 +107,61 @@ mod tests {
 
     #[test]
     fn writer_errors_are_returned() {
-        let mut session = test_session(Vec::new(), true);
-        let input = b"{\"type\":\"app::launch\",\"path\":\"/Applications/Safari.app\"}\n";
+        let mut handler = RecordingHandler::with_response(ServerMessage::ActionResult {
+            result_id: "application:/Applications/Safari.app".to_string(),
+            action_id: "open".to_string(),
+            ok: true,
+            error: None,
+        });
+        let input = b"{\"type\":\"launcher::execute\",\"result_id\":\"application:/Applications/Safari.app\",\"action_id\":\"open\"}\n";
         let mut writer = FailingWriter;
 
-        let error = run_ndjson_loop(io::Cursor::new(input), &mut writer, &mut session).unwrap_err();
+        let error = run_ndjson_loop(io::Cursor::new(input), &mut writer, &mut handler).unwrap_err();
 
         assert_eq!(error.kind(), ErrorKind::BrokenPipe);
     }
 
-    fn test_session(roots: Vec<PathBuf>, launch_succeeds: bool) -> CoreSession {
-        CoreSession::with_applications(Applications::with_roots_and_launcher_for_test(
-            roots,
-            move |_| Ok(status(launch_succeeds)),
-        ))
+    #[derive(Default)]
+    struct RecordingHandler {
+        messages: Vec<ClientMessage>,
+        responses: Vec<ServerMessage>,
     }
 
-    #[cfg(unix)]
-    fn status(success: bool) -> ExitStatus {
-        if success {
-            ExitStatus::from_raw(0)
-        } else {
-            ExitStatus::from_raw(1 << 8)
+    impl RecordingHandler {
+        fn with_response(response: ServerMessage) -> Self {
+            Self::with_responses(vec![response])
+        }
+
+        fn with_responses(responses: Vec<ServerMessage>) -> Self {
+            Self {
+                messages: Vec::new(),
+                responses,
+            }
+        }
+    }
+
+    impl MessageHandler for RecordingHandler {
+        fn handle_client_message(&mut self, message: ClientMessage) -> Vec<ServerMessage> {
+            self.messages.push(message);
+            if self.responses.is_empty() {
+                Vec::new()
+            } else {
+                vec![self.responses.remove(0)]
+            }
+        }
+    }
+
+    fn test_result() -> LauncherResult {
+        LauncherResult {
+            id: "application:/Applications/Safari.app".to_string(),
+            title: "Safari".to_string(),
+            subtitle: Some("/Applications/Safari.app".to_string()),
+            source: "applications".to_string(),
+            icon: None,
+            actions: vec![LauncherAction {
+                id: "open".to_string(),
+                title: "Open".to_string(),
+            }],
         }
     }
 
@@ -160,13 +205,5 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
-    }
-
-    fn unique_temp_dir() -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("launchkick-transport-{nanos}"))
     }
 }

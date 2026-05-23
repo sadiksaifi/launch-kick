@@ -1,5 +1,5 @@
 struct LauncherState: Equatable {
-    private(set) var apps: [LauncherApplication] = []
+    private(set) var results: [LauncherResult] = []
     private(set) var selectedIndex: Int?
     private(set) var isVisible = false
 
@@ -16,15 +16,21 @@ struct LauncherState: Equatable {
         isVisible ? hide() : show()
     }
 
-    mutating func replaceApps(_ apps: [LauncherApplication]) {
-        self.apps = apps
+    mutating func replaceResults(_ results: [LauncherResult]) {
+        let selectedID = selectedResult()?.id
+        self.results = results
 
-        guard !apps.isEmpty else {
+        guard !results.isEmpty else {
             selectedIndex = nil
             return
         }
 
-        if let selectedIndex, apps.indices.contains(selectedIndex) {
+        if let selectedID, let preservedIndex = results.firstIndex(where: { $0.id == selectedID }) {
+            selectedIndex = preservedIndex
+            return
+        }
+
+        if let selectedIndex, results.indices.contains(selectedIndex) {
             return
         }
 
@@ -32,31 +38,31 @@ struct LauncherState: Equatable {
     }
 
     mutating func moveSelection(by delta: Int) {
-        guard !apps.isEmpty else {
+        guard !results.isEmpty else {
             selectedIndex = nil
             return
         }
 
         let currentIndex = selectedIndex ?? 0
-        selectedIndex = max(0, min(apps.count - 1, currentIndex + delta))
+        selectedIndex = max(0, min(results.count - 1, currentIndex + delta))
     }
 
     mutating func select(index: Int) {
-        selectedIndex = apps.indices.contains(index) ? index : nil
+        selectedIndex = results.indices.contains(index) ? index : nil
     }
 
-    func selectedApplication() -> LauncherApplication? {
-        guard let selectedIndex, apps.indices.contains(selectedIndex) else { return nil }
-        return apps[selectedIndex]
+    func selectedResult() -> LauncherResult? {
+        guard let selectedIndex, results.indices.contains(selectedIndex) else { return nil }
+        return results[selectedIndex]
     }
 
-    func app(at index: Int) -> LauncherApplication? {
-        guard apps.indices.contains(index) else { return nil }
-        return apps[index]
+    func result(at index: Int) -> LauncherResult? {
+        guard results.indices.contains(index) else { return nil }
+        return results[index]
     }
 
     private mutating func ensureSelection() {
-        if !apps.isEmpty && selectedIndex == nil {
+        if !results.isEmpty && selectedIndex == nil {
             selectedIndex = 0
         }
     }
