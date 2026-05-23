@@ -4,7 +4,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private var panel: LauncherPanel!
     private var input: LauncherTextField!
     private var appTable: NSTableView!
-    private var apps: [LauncherApplication] = []
+    private var state = LauncherState()
     private var hotKey: HotKey!
     private var localKeyMonitor: Any?
     private var globalKeyMonitor: Any?
@@ -35,16 +35,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         coreIPC.onAppList = { [weak self] apps in
             self?.showApps(apps)
         }
+        coreIPC.onAppLaunchResult = { path, ok, error in
+            guard !ok else { return }
+            fputs("LaunchKick launch failed for \(path): \(error ?? "unknown error")\n", stderr)
+        }
         coreIPC.startListening()
     }
 
     private func showApps(_ apps: [LauncherApplication]) {
-        self.apps = apps
+        state.replaceApps(apps)
         appTable.reloadData()
-
-        if !apps.isEmpty && appTable.selectedRow == -1 {
-            appTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        }
+        syncSelectionToTable()
     }
 
     private func registerHotKey() {
@@ -98,53 +99,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             return
         }
 
+        showLauncher()
+    }
+
+    private func showLauncher() {
+        state.show()
         panel.center()
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         input.stringValue = ""
-        ensureSelection()
+        syncSelectionToTable()
         panel.makeFirstResponder(input)
         coreIPC.sendAppListRequest()
     }
 
     private func hideLauncher() {
+        state.hide()
         panel.orderOut(nil)
     }
 
-    private func ensureSelection() {
-        guard !apps.isEmpty, appTable.selectedRow == -1 else { return }
-        appTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+    private func moveSelection(by delta: Int) {
+        state.moveSelection(by: delta)
+        syncSelectionToTable()
     }
 
-    private func moveSelection(by delta: Int) {
-        guard !apps.isEmpty else { return }
+    private func syncSelectionToTable() {
+        guard let selectedIndex = state.selectedIndex else {
+            appTable.deselectAll(nil)
+            return
+        }
 
-        let currentRow = appTable.selectedRow == -1 ? 0 : appTable.selectedRow
-        let nextRow = max(0, min(apps.count - 1, currentRow + delta))
-        appTable.selectRowIndexes(IndexSet(integer: nextRow), byExtendingSelection: false)
-        appTable.scrollRowToVisible(nextRow)
+        appTable.selectRowIndexes(IndexSet(integer: selectedIndex), byExtendingSelection: false)
+        appTable.scrollRowToVisible(selectedIndex)
     }
 
     private func launchSelectedApp() {
-        let selectedRow = appTable.selectedRow
-        guard apps.indices.contains(selectedRow) else { return }
+        if appTable.selectedRow != -1 {
+            state.select(index: appTable.selectedRow)
+        }
 
-        coreIPC.sendAppLaunch(path: apps[selectedRow].path)
+        guard let app = state.selectedApplication() else { return }
+
+        coreIPC.sendAppLaunch(path: app.path)
         hideLauncher()
     }
 
     @objc private func appTableClicked() {
+        if appTable.clickedRow != -1 {
+            state.select(index: appTable.clickedRow)
+        }
         launchSelectedApp()
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        apps.count
+        state.apps.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard apps.indices.contains(row) else { return nil }
+        guard let app = state.app(at: row) else { return nil }
 
-        let app = apps[row]
         let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: tableView.bounds.width, height: tableView.rowHeight))
         cell.identifier = NSUserInterfaceItemIdentifier("ApplicationCell")
 
