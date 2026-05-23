@@ -7,7 +7,11 @@ use crate::{
     applications::{Application, Applications},
     ipc::{IconDescriptor, LauncherAction, LauncherResult},
 };
-use std::sync::Arc;
+use nucleo_matcher::{
+    Config, Matcher, Utf32Str,
+    pattern::{AtomKind, CaseMatching, Normalization, Pattern},
+};
+use std::{cmp::Reverse, sync::Arc};
 
 const APPLICATION_SOURCE: &str = "applications";
 const OPEN_ACTION: &str = "open";
@@ -34,55 +38,69 @@ impl CommandSource for ApplicationCommandSource {
         &self,
         query: &str,
     ) -> Result<Vec<LauncherResultRecord>, CommandSourceError> {
-        let normalized_query = query.trim().to_lowercase();
-        let mut records = self
+        let pattern = query_pattern(query);
+        let mut name_matcher = Matcher::default();
+        let mut path_matcher = Matcher::new(Config::DEFAULT.match_paths());
+        let mut buf = Vec::new();
+        let mut applications = self
             .applications
             .list()
             .into_iter()
-            .filter(|application| application_matches(application, &normalized_query))
-            .map(|application| application_record(application, Arc::clone(&self.applications)))
+            .map(|application| {
+                let rank = application_rank(
+                    &application,
+                    &pattern,
+                    &mut name_matcher,
+                    &mut path_matcher,
+                    &mut buf,
+                );
+                (rank, application)
+            })
             .collect::<Vec<_>>();
 
-        records.sort_by(|left, right| {
-            let left_result = left.as_result();
-            let right_result = right.as_result();
-
-            result_rank(&left_result.title, &normalized_query)
-                .cmp(&result_rank(&right_result.title, &normalized_query))
-                .then_with(|| {
-                    left_result
-                        .title
-                        .to_lowercase()
-                        .cmp(&right_result.title.to_lowercase())
-                })
-                .then_with(|| left_result.id.cmp(&right_result.id))
+        applications.sort_by(|(left_rank, left), (right_rank, right)| {
+            left_rank
+                .cmp(right_rank)
+                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+                .then_with(|| left.path.cmp(&right.path))
         });
 
-        Ok(records)
+        Ok(applications
+            .into_iter()
+            .map(|(_, application)| application_record(application, Arc::clone(&self.applications)))
+            .collect())
     }
 }
 
-fn application_matches(application: &Application, normalized_query: &str) -> bool {
-    normalized_query.is_empty()
-        || application.name.to_lowercase().contains(normalized_query)
-        || application.path.to_lowercase().contains(normalized_query)
+fn query_pattern(query: &str) -> Pattern {
+    Pattern::new(
+        query.trim(),
+        CaseMatching::Ignore,
+        Normalization::Smart,
+        AtomKind::Fuzzy,
+    )
 }
 
-fn result_rank(title: &str, normalized_query: &str) -> usize {
-    if normalized_query.is_empty() {
-        return 0;
+fn application_rank(
+    application: &Application,
+    pattern: &Pattern,
+    name_matcher: &mut Matcher,
+    path_matcher: &mut Matcher,
+    buf: &mut Vec<char>,
+) -> (usize, Reverse<u32>) {
+    if pattern.atoms.is_empty() {
+        return (0, Reverse(0));
     }
 
-    let normalized_title = title.to_lowercase();
-    if normalized_title == normalized_query {
-        0
-    } else if normalized_title.starts_with(normalized_query) {
-        1
-    } else if normalized_title.contains(normalized_query) {
-        2
-    } else {
-        3
+    if let Some(score) = pattern.score(Utf32Str::new(&application.name, buf), name_matcher) {
+        return (0, Reverse(score));
     }
+
+    if let Some(score) = pattern.score(Utf32Str::new(&application.path, buf), path_matcher) {
+        return (1, Reverse(score));
+    }
+
+    (2, Reverse(0))
 }
 
 fn application_record(
@@ -170,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn filters_and_ranks_application_results() {
+    fn fuzzy_orders_application_results_without_filtering() {
         let root = unique_temp_dir();
         fs::create_dir_all(root.join("Notes.app/Contents")).unwrap();
         fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
@@ -186,7 +204,15 @@ mod tests {
             .map(|record| record.as_result().title.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(titles, vec!["Safari", "Safe Exam Browser"]);
+        assert_eq!(titles, vec!["Safari", "Safe Exam Browser", "Notes"]);
+
+        let fuzzy_records = source.results_for_query("nts").unwrap();
+        let fuzzy_titles = fuzzy_records
+            .iter()
+            .map(|record| record.as_result().title.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(fuzzy_titles[0], "Notes");
 
         let _ = fs::remove_dir_all(root);
     }
