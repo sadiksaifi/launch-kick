@@ -49,14 +49,14 @@ struct LauncherInteraction {
             return [.syncSelection]
         case .executeSelected:
             guard let intent = selectedExecuteIntent() else { return [] }
-            state.hide()
-            return [.sendToCore(.execute(intent)), .hidePanel]
+            return [.sendToCore(.execute(intent))] + hide()
         }
     }
 
     mutating func receive(_ event: LauncherCoreEvent) -> [LauncherEffect] {
         switch event {
-        case let .results(_, results):
+        case let .results(query, results):
+            guard state.isVisible || query.isEmpty else { return [] }
             state.replaceResults(results)
             return [.reloadResults, .syncSelection]
         case let .actionResult(intent, ok, error):
@@ -87,6 +87,6 @@ struct LauncherInteraction {
 
     private mutating func hide() -> [LauncherEffect] {
         state.hide()
-        return [.hidePanel]
+        return [.hidePanel, .clearInput, .sendToCore(.queryChanged(""))]
     }
 }

@@ -20,12 +20,19 @@ final class LauncherInteractionTests: XCTestCase {
         )
     }
 
-    func testToggleVisibilityHidesVisibleLauncher() {
+    func testToggleVisibilityHidesVisibleLauncherAndRequestsInitialResults() {
         var interaction = LauncherInteraction()
         _ = interaction.apply(.toggleVisibility)
+        _ = interaction.receive(.results(query: "", results: results()))
+        _ = interaction.apply(.selectResult(index: 1))
 
-        XCTAssertEqual(interaction.apply(.toggleVisibility), [.hidePanel])
+        XCTAssertEqual(
+            interaction.apply(.toggleVisibility),
+            [.hidePanel, .clearInput, .sendToCore(.queryChanged(""))]
+        )
         XCTAssertFalse(interaction.stateSnapshot.isVisible)
+        XCTAssertEqual(interaction.stateSnapshot.results, results())
+        XCTAssertEqual(interaction.stateSnapshot.selectedIndex, 1)
     }
 
     func testQueryChangeSendsQueryToCore() {
@@ -36,6 +43,7 @@ final class LauncherInteractionTests: XCTestCase {
 
     func testIncomingResultsReplaceStateAndReload() {
         var interaction = LauncherInteraction()
+        _ = interaction.apply(.toggleVisibility)
 
         let effects = interaction.receive(.results(query: "", results: results()))
 
@@ -46,6 +54,7 @@ final class LauncherInteractionTests: XCTestCase {
 
     func testSelectionMovementUpdatesStateAndSyncsSelection() {
         var interaction = LauncherInteraction()
+        _ = interaction.apply(.toggleVisibility)
         _ = interaction.receive(.results(query: "", results: results()))
 
         XCTAssertEqual(interaction.apply(.moveSelection(1)), [.syncSelection])
@@ -54,6 +63,7 @@ final class LauncherInteractionTests: XCTestCase {
 
     func testIncomingResultsResetSelectionToFirstResult() {
         var interaction = LauncherInteraction()
+        _ = interaction.apply(.toggleVisibility)
         _ = interaction.receive(.results(query: "", results: results()))
         _ = interaction.apply(.selectResult(index: 1))
 
@@ -77,13 +87,18 @@ final class LauncherInteractionTests: XCTestCase {
             [
                 .sendToCore(.execute(ExecuteIntent(resultID: "application:/Applications/Notes.app", actionID: "open"))),
                 .hidePanel,
+                .clearInput,
+                .sendToCore(.queryChanged("")),
             ]
         )
         XCTAssertFalse(interaction.stateSnapshot.isVisible)
+        XCTAssertEqual(interaction.stateSnapshot.results, results())
+        XCTAssertEqual(interaction.stateSnapshot.selectedIndex, 1)
     }
 
     func testExecuteSelectedWithoutActionDoesNothing() {
         var interaction = LauncherInteraction()
+        _ = interaction.apply(.toggleVisibility)
         _ = interaction.receive(.results(query: "", results: [result(id: "command:empty", title: "Empty", actions: [])]))
 
         XCTAssertEqual(interaction.apply(.executeSelected), [])
@@ -104,6 +119,26 @@ final class LauncherInteractionTests: XCTestCase {
         let intent = ExecuteIntent(resultID: "application:/Applications/Safari.app", actionID: "open")
 
         XCTAssertEqual(interaction.receive(.actionResult(intent: intent, ok: true, error: nil)), [])
+    }
+
+    func testIncomingNonEmptyQueryResultsWhileHiddenAreIgnored() {
+        var interaction = LauncherInteraction()
+
+        let effects = interaction.receive(.results(query: "saf", results: results()))
+
+        XCTAssertEqual(effects, [])
+        XCTAssertTrue(interaction.stateSnapshot.results.isEmpty)
+        XCTAssertNil(interaction.stateSnapshot.selectedIndex)
+    }
+
+    func testIncomingEmptyQueryResultsWhileHiddenPrimeInitialState() {
+        var interaction = LauncherInteraction()
+
+        let effects = interaction.receive(.results(query: "", results: results()))
+
+        XCTAssertEqual(effects, [.reloadResults, .syncSelection])
+        XCTAssertEqual(interaction.stateSnapshot.results, results())
+        XCTAssertEqual(interaction.stateSnapshot.selectedIndex, 0)
     }
 
     private func results() -> [LauncherResult] {
