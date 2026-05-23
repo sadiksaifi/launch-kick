@@ -70,10 +70,9 @@ mod tests {
 
     #[test]
     fn decodes_app_launch_message() {
-        let message = decode_client_line(
-            r#"{"type":"app::launch","path":"/Applications/Safari.app"}"#,
-        )
-        .unwrap();
+        let message =
+            decode_client_line(r#"{"type":"app::launch","path":"/Applications/Safari.app"}"#)
+                .unwrap();
 
         assert_eq!(
             message,
@@ -99,7 +98,10 @@ mod tests {
 
     #[test]
     fn rejects_malformed_json() {
-        assert!(decode_client_line(r#"{"type":"app::launch","path":"/Applications/Safari.app""#).is_err());
+        assert!(
+            decode_client_line(r#"{"type":"app::launch","path":"/Applications/Safari.app""#)
+                .is_err()
+        );
     }
 
     #[test]
