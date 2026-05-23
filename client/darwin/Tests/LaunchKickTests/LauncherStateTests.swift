@@ -1,5 +1,5 @@
-import XCTest
 @testable import LaunchKick
+import XCTest
 
 final class LauncherStateTests: XCTestCase {
     func testReplacingNonEmptyResultsSelectsFirstResult() {

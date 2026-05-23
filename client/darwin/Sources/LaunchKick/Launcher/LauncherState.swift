@@ -18,7 +18,11 @@ struct LauncherState: Equatable {
     }
 
     mutating func toggleVisibility() {
-        isVisible ? hide() : show()
+        if isVisible {
+            hide()
+        } else {
+            show()
+        }
     }
 
     mutating func replaceResults(_ results: [LauncherResult]) {
@@ -72,7 +76,7 @@ struct LauncherState: Equatable {
     }
 
     private mutating func ensureSelection() {
-        if !results.isEmpty && selectedIndex == nil {
+        if !results.isEmpty, selectedIndex == nil {
             selectedIndex = 0
         }
     }

@@ -1,6 +1,6 @@
 import Foundation
-import XCTest
 @testable import LaunchKick
+import XCTest
 
 final class NDJSONLineBufferTests: XCTestCase {
     func testReturnsCompleteLineFromSingleChunk() {
@@ -26,10 +26,10 @@ final class NDJSONLineBufferTests: XCTestCase {
         XCTAssertEqual(buffer.append(Data("e\n".utf8)), ["one"])
     }
 
-    func testPreservesSplitMultibyteUTF8AcrossChunks() {
+    func testPreservesSplitMultibyteUTF8AcrossChunks() throws {
         var buffer = NDJSONLineBuffer()
         let data = Data("Safári\n".utf8)
-        let splitIndex = data.firstIndex(of: 0xC3)!
+        let splitIndex = try XCTUnwrap(data.firstIndex(of: 0xC3))
 
         XCTAssertEqual(buffer.append(Data(data[..<splitIndex])), [])
         XCTAssertEqual(buffer.append(Data(data[splitIndex...])), ["Safári"])

@@ -19,14 +19,16 @@ Native Raycast-style command launcher with a Rust core and platform-specific nat
 
 ## Commands
 
-- `just run` — build the macOS client if needed, then run the Rust core.
-- `just build-ui` — build the macOS UI binary.
-- `just build-core` — build the Rust core.
-- `just check` — verify Rust core and macOS client build.
-- `just fmt` — format Rust code.
-- `just clean-ui` — remove UI build artifacts.
-- `just clean-core` — remove Rust target artifacts.
-- `just clean` — clean both UI and core artifacts.
+- `just doctor` — verify required Rust and Swift developer tools are installed.
+- `just run` — stage the Swift Darwin client if needed, then run the Rust core.
+- `just build` / `just build-release` — build the Rust core and stage the Swift Darwin client.
+- `just check` — check Rust and Swift compilation.
+- `just test` — run Rust and Swift tests.
+- `just lint` — run Clippy and SwiftLint.
+- `just fmt` / `just fmt-check` — run rustfmt and SwiftFormat.
+- `just ci` — run formatting checks, linters, compile checks, and tests.
+- `just clean` — remove Rust and Swift build artifacts.
+- Use language-specific recipes (`rust-*`, `swift-*`, `clippy`, `rustfmt`, `swiftlint`, `swiftformat`) when working in one side of the repo.
 
 ## Working rules
 

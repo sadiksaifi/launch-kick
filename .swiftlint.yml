@@ -1,0 +1,42 @@
+# SwiftLint configuration for the Darwin platform client.
+# Keep lint focused on source and tests; SwiftPM scratch/build directories are generated.
+
+included:
+  - client/darwin/Sources
+  - client/darwin/Tests
+
+excluded:
+  - .build
+  - client/darwin/.build
+
+disabled_rules:
+  # SwiftFormat owns trailing comma policy.
+  - trailing_comma
+
+line_length:
+  warning: 140
+  error: 180
+  ignores_comments: true
+  ignores_urls: true
+  ignores_function_declarations: true
+
+identifier_name:
+  min_length:
+    warning: 2
+  excluded:
+    - id
+    - ok
+
+function_body_length:
+  warning: 80
+  error: 120
+
+type_body_length:
+  warning: 300
+  error: 500
+
+file_length:
+  warning: 500
+  error: 800
+
+reporter: "xcode"
