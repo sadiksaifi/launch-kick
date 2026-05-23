@@ -6,16 +6,22 @@ enum CoreIPCError: Error, Equatable {
     case clientEncodingFailed
 }
 
-final class CoreIPC {
-    private var lineBuffer = NDJSONLineBuffer()
-    private let contract: IPCContract
-    private let input: FileHandle
-    private let output: FileHandle
-    private let callbackQueue: DispatchQueue
+enum CoreIPCIntent: Equatable {
+    case queryChanged(String)
+    case execute(ExecuteIntent)
+}
 
-    var onResults: ((String, [LauncherResult]) -> Void)?
-    var onActionResult: ((String, String, Bool, String?) -> Void)?
-    var onError: ((CoreIPCError) -> Void)?
+enum CoreIPCEvent: Equatable {
+    case results(query: String, results: [LauncherResult])
+    case actionResult(intent: ExecuteIntent, ok: Bool, error: String?)
+    case failed(CoreIPCError)
+}
+
+final class CoreIPC {
+    private let contract: IPCContract
+    private let stream: CoreIPCStream
+
+    var onEvent: ((CoreIPCEvent) -> Void)?
 
     init(
         input: FileHandle = .standardInput,
@@ -23,9 +29,7 @@ final class CoreIPC {
         callbackQueue: DispatchQueue = .main,
         contract: IPCContract = IPCContract()
     ) {
-        self.input = input
-        self.output = output
-        self.callbackQueue = callbackQueue
+        stream = CoreIPCStream(input: input, output: output, callbackQueue: callbackQueue)
         self.contract = contract
     }
 
@@ -34,39 +38,39 @@ final class CoreIPC {
     }
 
     func startListening() {
-        input.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            if data.isEmpty {
-                self?.stopListening()
-                return
-            }
-
-            self?.callbackQueue.async {
-                self?.handle(data)
-            }
+        stream.start { [weak self] event in
+            self?.handle(event)
         }
     }
 
     func stopListening() {
-        input.readabilityHandler = nil
+        stream.stop()
     }
 
-    func sendQuery(_ query: String) {
-        sendToCore(.query(query))
+    func send(_ intent: CoreIPCIntent) {
+        let message: ClientMessage = switch intent {
+        case let .queryChanged(query):
+            .query(query)
+        case let .execute(intent):
+            .execute(resultID: intent.resultID, actionID: intent.actionID)
+        }
+
+        do {
+            let line = try contract.encodeClientLine(message)
+            try stream.writeLine(line)
+        } catch {
+            onEvent?(.failed(.clientEncodingFailed))
+        }
     }
 
-    func sendExecute(resultID: String, actionID: String) {
-        sendToCore(.execute(resultID: resultID, actionID: actionID))
-    }
-
-    private func handle(_ data: Data) {
-        for record in lineBuffer.append(data) {
-            switch record {
-            case let .line(line):
-                handleLine(line)
-            case .invalidUTF8:
-                onError?(.invalidUTF8Line)
-            }
+    private func handle(_ event: CoreIPCStreamEvent) {
+        switch event {
+        case let .line(line):
+            handleLine(line)
+        case .invalidUTF8Line:
+            onEvent?(.failed(.invalidUTF8Line))
+        case .closed:
+            break
         }
     }
 
@@ -75,25 +79,16 @@ final class CoreIPC {
             let message = try contract.decodeServerLine(line)
             switch message {
             case let .results(query, results):
-                onResults?(query, results)
+                onEvent?(.results(query: query, results: results))
             case let .actionResult(resultID, actionID, ok, error):
-                onActionResult?(resultID, actionID, ok, error)
+                onEvent?(.actionResult(
+                    intent: ExecuteIntent(resultID: resultID, actionID: actionID),
+                    ok: ok,
+                    error: error
+                ))
             }
         } catch {
-            onError?(.invalidServerMessage(line))
+            onEvent?(.failed(.invalidServerMessage(line)))
         }
-    }
-
-    private func sendToCore(_ message: ClientMessage) {
-        guard
-            let line = try? contract.encodeClientLine(message),
-            let data = line.data(using: .utf8)
-        else {
-            onError?(.clientEncodingFailed)
-            return
-        }
-
-        output.write(data)
-        fflush(stdout)
     }
 }

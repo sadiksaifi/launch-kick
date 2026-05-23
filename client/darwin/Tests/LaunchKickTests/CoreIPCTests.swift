@@ -13,34 +13,33 @@ final class CoreIPCTests: XCTestCase {
         super.tearDown()
     }
 
-    func testSendQueryWritesClientQueryLine() throws {
+    func testSendQueryIntentWritesClientQueryLine() throws {
         let output = Pipe()
         let ipc = CoreIPC(input: Pipe().fileHandleForReading, output: output.fileHandleForWriting)
 
-        ipc.sendQuery("")
+        ipc.send(.queryChanged(""))
 
         let line = try XCTUnwrap(String(data: output.fileHandleForReading.availableData, encoding: .utf8))
         try XCTAssertJSONLine(line, equalsFixture: "client-query-empty.json")
     }
 
-    func testSendExecuteWritesClientExecuteLine() throws {
+    func testSendExecuteIntentWritesClientExecuteLine() throws {
         let output = Pipe()
         let ipc = CoreIPC(input: Pipe().fileHandleForReading, output: output.fileHandleForWriting)
 
-        ipc.sendExecute(resultID: "application:/Applications/Safari.app", actionID: "open")
+        ipc.send(.execute(ExecuteIntent(resultID: "application:/Applications/Safari.app", actionID: "open")))
 
         let line = try XCTUnwrap(String(data: output.fileHandleForReading.availableData, encoding: .utf8))
         try XCTAssertJSONLine(line, equalsFixture: "client-execute-result.json")
     }
 
-    func testIncomingResultsInvokesCallback() throws {
+    func testIncomingResultsEmitsEvent() throws {
         let input = Pipe()
         let ipc = listeningIPC(input: input)
         let received = expectation(description: "received results")
 
-        ipc.onResults = { query, results in
-            XCTAssertEqual(query, "")
-            XCTAssertEqual(results, [self.safariResult()])
+        ipc.onEvent = { event in
+            XCTAssertEqual(event, .results(query: "", results: [self.safariResult()]))
             received.fulfill()
         }
         ipc.startListening()
@@ -50,16 +49,20 @@ final class CoreIPCTests: XCTestCase {
         wait(for: [received], timeout: 2)
     }
 
-    func testIncomingActionResultInvokesCallback() throws {
+    func testIncomingActionResultEmitsEvent() throws {
         let input = Pipe()
         let ipc = listeningIPC(input: input)
         let received = expectation(description: "received action result")
 
-        ipc.onActionResult = { resultID, actionID, ok, error in
-            XCTAssertEqual(resultID, "application:/Applications/Safari.app")
-            XCTAssertEqual(actionID, "open")
-            XCTAssertTrue(ok)
-            XCTAssertNil(error)
+        ipc.onEvent = { event in
+            XCTAssertEqual(
+                event,
+                .actionResult(
+                    intent: ExecuteIntent(resultID: "application:/Applications/Safari.app", actionID: "open"),
+                    ok: true,
+                    error: nil
+                )
+            )
             received.fulfill()
         }
         ipc.startListening()
@@ -75,18 +78,47 @@ final class CoreIPCTests: XCTestCase {
         let reportedError = expectation(description: "reported error")
         let receivedResults = expectation(description: "received results")
 
-        ipc.onError = { error in
-            XCTAssertEqual(error, .invalidServerMessage("not json"))
-            reportedError.fulfill()
-        }
-        ipc.onResults = { _, results in
-            XCTAssertEqual(results, [self.safariResult()])
-            receivedResults.fulfill()
+        ipc.onEvent = { event in
+            switch event {
+            case .failed(.invalidServerMessage("not json")):
+                reportedError.fulfill()
+            case let .results(_, results):
+                XCTAssertEqual(results, [self.safariResult()])
+                receivedResults.fulfill()
+            default:
+                XCTFail("unexpected event \(event)")
+            }
         }
         ipc.startListening()
 
         let validLine = try fixtureLine("server-results.json")
         input.fileHandleForWriting.write(Data(("not json\n" + validLine + "\n").utf8))
+
+        wait(for: [reportedError, receivedResults], timeout: 2)
+    }
+
+    func testInvalidUTF8LineReportsErrorAndContinues() throws {
+        let input = Pipe()
+        let ipc = listeningIPC(input: input)
+        let reportedError = expectation(description: "reported invalid UTF-8")
+        let receivedResults = expectation(description: "received results")
+
+        ipc.onEvent = { event in
+            switch event {
+            case .failed(.invalidUTF8Line):
+                reportedError.fulfill()
+            case let .results(_, results):
+                XCTAssertEqual(results, [self.safariResult()])
+                receivedResults.fulfill()
+            default:
+                XCTFail("unexpected event \(event)")
+            }
+        }
+        ipc.startListening()
+
+        var data = Data([0xFF, 0x0A])
+        try data.append(Data((fixtureLine("server-results.json") + "\n").utf8))
+        input.fileHandleForWriting.write(data)
 
         wait(for: [reportedError, receivedResults], timeout: 2)
     }

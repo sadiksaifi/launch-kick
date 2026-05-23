@@ -4,7 +4,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     private var panel: LauncherPanel!
     private var input: LauncherTextField!
     private var resultTable: NSTableView!
-    private var state = LauncherState()
+    private var interaction = LauncherInteraction()
     private var hotKey: HotKey!
     private var localKeyMonitor: Any?
     private var globalKeyMonitor: Any?
@@ -18,7 +18,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     func start() {
         createPanel()
         listenToCore()
-        coreIPC.sendQuery("")
+        perform(interaction.apply(.started))
         registerHotKey()
         registerKeyboardShortcuts()
     }
@@ -30,10 +30,10 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
         resultTable = view.resultTable
 
         panel.onCancel = { [weak self] in
-            self?.hideLauncher()
+            self?.apply(.hide)
         }
         input.onCancel = { [weak self] in
-            self?.hideLauncher()
+            self?.apply(.hide)
         }
         input.delegate = self
         resultTable.dataSource = self
@@ -43,25 +43,26 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
     }
 
     private func listenToCore() {
-        coreIPC.onResults = { [weak self] _, results in
-            self?.showResults(results)
-        }
-        coreIPC.onActionResult = { resultID, actionID, ok, error in
-            guard !ok else { return }
-            fputs("LaunchKick action failed for \(resultID)#\(actionID): \(error ?? "unknown error")\n", stderr)
+        coreIPC.onEvent = { [weak self] event in
+            self?.receive(event)
         }
         coreIPC.startListening()
     }
 
-    private func showResults(_ results: [LauncherResult]) {
-        state.replaceResults(results)
-        resultTable.reloadData()
-        syncSelectionToTable()
+    private func receive(_ event: CoreIPCEvent) {
+        switch event {
+        case let .results(query, results):
+            perform(interaction.receive(.results(query: query, results: results)))
+        case let .actionResult(intent, ok, error):
+            perform(interaction.receive(.actionResult(intent: intent, ok: ok, error: error)))
+        case let .failed(error):
+            perform([.logError("LaunchKick IPC failed: \(error)")])
+        }
     }
 
     private func registerHotKey() {
         hotKey = HotKey { [weak self] in
-            self?.toggleLauncher()
+            self?.apply(.toggleVisibility)
         }
         hotKey.register()
     }
@@ -73,7 +74,7 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             }
 
             if event.isEscape {
-                hideLauncher()
+                apply(.hide)
                 return nil
             }
 
@@ -83,12 +84,12 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             }
 
             if event.isArrowDown {
-                moveSelection(by: 1)
+                apply(.moveSelection(1))
                 return nil
             }
 
             if event.isArrowUp {
-                moveSelection(by: -1)
+                apply(.moveSelection(-1))
                 return nil
             }
 
@@ -99,43 +100,42 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
             guard event.isEscape, self?.panel.isVisible == true else { return }
 
             DispatchQueue.main.async {
-                self?.hideLauncher()
+                self?.apply(.hide)
             }
         }
     }
 
-    private func toggleLauncher() {
-        if panel.isVisible {
-            hideLauncher()
-            return
+    private func apply(_ intent: LauncherUserIntent) {
+        perform(interaction.apply(intent))
+    }
+
+    private func perform(_ effects: [LauncherEffect]) {
+        for effect in effects {
+            switch effect {
+            case .showPanel:
+                panel.center()
+                panel.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            case .hidePanel:
+                panel.orderOut(nil)
+            case .focusInput:
+                panel.makeFirstResponder(input)
+            case .clearInput:
+                input.stringValue = ""
+            case .reloadResults:
+                resultTable.reloadData()
+            case .syncSelection:
+                syncSelectionToTable()
+            case let .sendToCore(intent):
+                coreIPC.send(intent)
+            case let .logError(message):
+                fputs("\(message)\n", stderr)
+            }
         }
-
-        showLauncher()
-    }
-
-    private func showLauncher() {
-        state.show()
-        panel.center()
-        panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        input.stringValue = ""
-        syncSelectionToTable()
-        panel.makeFirstResponder(input)
-        coreIPC.sendQuery("")
-    }
-
-    private func hideLauncher() {
-        state.hide()
-        panel.orderOut(nil)
-    }
-
-    private func moveSelection(by delta: Int) {
-        state.moveSelection(by: delta)
-        syncSelectionToTable()
     }
 
     private func syncSelectionToTable() {
-        guard let selectedIndex = state.selectedIndex else {
+        guard let selectedIndex = interaction.stateSnapshot.selectedIndex else {
             resultTable.deselectAll(nil)
             return
         }
@@ -146,32 +146,28 @@ final class LauncherController: NSObject, NSTextFieldDelegate, NSTableViewDataSo
 
     private func executeSelectedResult() {
         if resultTable.selectedRow != -1 {
-            state.select(index: resultTable.selectedRow)
+            apply(.selectResult(index: resultTable.selectedRow))
         }
-
-        guard let intent = state.selectedExecuteIntent() else { return }
-
-        coreIPC.sendExecute(resultID: intent.resultID, actionID: intent.actionID)
-        hideLauncher()
+        apply(.executeSelected)
     }
 
     @objc private func resultTableClicked() {
         if resultTable.clickedRow != -1 {
-            state.select(index: resultTable.clickedRow)
+            apply(.selectResult(index: resultTable.clickedRow))
         }
         executeSelectedResult()
     }
 
     func controlTextDidChange(_: Notification) {
-        coreIPC.sendQuery(input.stringValue)
+        apply(.queryChanged(input.stringValue))
     }
 
     func numberOfRows(in _: NSTableView) -> Int {
-        state.results.count
+        interaction.stateSnapshot.results.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
-        guard let result = state.result(at: row) else { return nil }
+        guard let result = interaction.result(at: row) else { return nil }
 
         let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: tableView.bounds.width, height: tableView.rowHeight))
         cell.identifier = NSUserInterfaceItemIdentifier("LauncherResultCell")

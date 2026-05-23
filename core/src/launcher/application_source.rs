@@ -1,6 +1,6 @@
 use super::{
     action::{ActionBinding, ActionExecutionError, ActionExecutor},
-    command_source::CommandSource,
+    command_source::{CommandSource, CommandSourceError},
     session_state::LauncherResultRecord,
 };
 use crate::{
@@ -30,7 +30,10 @@ impl ApplicationCommandSource {
 }
 
 impl CommandSource for ApplicationCommandSource {
-    fn results_for_query(&self, query: &str) -> Vec<LauncherResultRecord> {
+    fn results_for_query(
+        &self,
+        query: &str,
+    ) -> Result<Vec<LauncherResultRecord>, CommandSourceError> {
         let normalized_query = query.trim().to_lowercase();
         let mut records = self
             .applications
@@ -55,7 +58,7 @@ impl CommandSource for ApplicationCommandSource {
                 .then_with(|| left_result.id.cmp(&right_result.id))
         });
 
-        records
+        Ok(records)
     }
 }
 
@@ -98,14 +101,15 @@ fn application_record(
         }),
         actions: Vec::new(),
     };
-
-    LauncherResultRecord::new(result).with_action(
+    let binding = ActionBinding::new(
         LauncherAction {
             id: OPEN_ACTION.to_string(),
             title: "Open".to_string(),
         },
-        ActionBinding::new(OpenApplicationAction { applications, path }),
-    )
+        OpenApplicationAction { applications, path },
+    );
+
+    LauncherResultRecord::new(result).with_action(binding)
 }
 
 struct OpenApplicationAction {
@@ -124,6 +128,7 @@ impl ActionExecutor for OpenApplicationAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::launcher::session_state::LauncherSessionState;
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -143,7 +148,7 @@ mod tests {
             true,
         ));
 
-        let records = source.results_for_query("");
+        let records = source.results_for_query("").unwrap();
         let result = records[0].as_result();
 
         assert_eq!(result.id, format!("application:{safari_path}"));
@@ -176,13 +181,62 @@ mod tests {
             true,
         ));
 
-        let records = source.results_for_query("saf");
+        let records = source.results_for_query("saf").unwrap();
         let titles = records
             .iter()
             .map(|record| record.as_result().title.as_str())
             .collect::<Vec<_>>();
 
         assert_eq!(titles, vec!["Safari", "Safe Exam Browser"]);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn application_open_action_executes_launch() {
+        let root = unique_temp_dir();
+        fs::create_dir_all(root.join("Safari.app/Contents")).unwrap();
+        let safari_path = canonical_string(&root.join("Safari.app"));
+        let source = ApplicationCommandSource::with_applications(test_applications(
+            vec![root.clone()],
+            true,
+        ));
+        let mut state = LauncherSessionState::default();
+        state.replace_results(String::new(), source.results_for_query("").unwrap());
+
+        state
+            .resolve_action(&format!("application:{safari_path}"), "open")
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn application_open_action_returns_launch_failure() {
+        let root = unique_temp_dir();
+        fs::create_dir_all(root.join("Missing.app/Contents")).unwrap();
+        let missing_path = canonical_string(&root.join("Missing.app"));
+        let source = ApplicationCommandSource::with_applications(test_applications(
+            vec![root.clone()],
+            false,
+        ));
+        let mut state = LauncherSessionState::default();
+        state.replace_results(String::new(), source.results_for_query("").unwrap());
+
+        let error = state
+            .resolve_action(&format!("application:{missing_path}"), "open")
+            .unwrap()
+            .execute()
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!("failed to launch {missing_path}: open exited with status 1")
+        );
 
         let _ = fs::remove_dir_all(root);
     }
