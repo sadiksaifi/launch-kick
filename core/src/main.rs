@@ -1,8 +1,9 @@
 mod app;
 mod applications;
 mod ipc;
+mod launcher;
 mod platform;
-mod session;
+mod transport;
 
 use std::error::Error;
 
